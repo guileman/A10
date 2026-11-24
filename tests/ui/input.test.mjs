@@ -96,6 +96,7 @@ test('cañón: Espacio se mantiene → triggerGun; botón izquierdo solo con mou
   down(win, 'Space'); assert.equal(input.getControls().triggerGun, true);
   up(win, 'Space'); assert.equal(input.getControls().triggerGun, false);
   const click = (type, button = 0) => win.document[type === 'mouseup' ? 'dispatchEvent' : 'body'] && (type === 'mouseup' ? win.document.dispatchEvent(new win.MouseEvent(type, { button, bubbles: true })) : win.document.body.dispatchEvent(new win.MouseEvent(type, { button, bubbles: true })));
+  input.setMouseStick(false);
   click('mousedown'); assert.equal(input.getControls().triggerGun, false, 'sin mouse-palanca no dispara');
   click('mouseup');
   input.setMouseStick(true);
@@ -188,6 +189,7 @@ test('palanca con mouse: movimiento relativo, recentrado suave tras una pausa', 
   const t = setup();
   const { win, input } = t;
   input.setMouseStick(true);
+  input.setSettings({ mouseSensitivity: 350, mouseRecenterRate: 2.2, mouseDeadzone: 0, mouseExpo: 0 }); // modo con recentrado (opcional)
   const mm = (x, y) => mouseMove(win, x, y);
   t.setNow(1); mm(175, -70);
   let c = input.getControls();
@@ -206,6 +208,7 @@ test('palanca con mouse: movimiento relativo, recentrado suave tras una pausa', 
 
 test('mouse como palanca desactivado: el movimiento no mueve controles; M alterna', () => {
   const { win, input } = setup();
+  input.setMouseStick(false);
   const mm = () => mouseMove(win, 100, 0);
   mm(); assert.equal(input.getControls().roll, 0);
   down(win, 'KeyM'); up(win, 'KeyM');
@@ -257,7 +260,7 @@ test('ajustes persistentes con validación y almacenamiento corrupto', () => {
   assert.equal(a.input.getSettings().ramp.rise, 1.2);
   a.input.setSettings({ throttleRate: 9999, ramp: { rise: -3 }, mouseSensitivity: 'x', expo: { pitch: 5 } });
   const s = a.input.getSettings();
-  assert.equal(s.throttleRate, 5); assert.ok(s.ramp.rise >= 0.3); assert.equal(s.mouseSensitivity, 350); assert.equal(s.expo.pitch, 0.95);
+  assert.equal(s.throttleRate, 5); assert.ok(s.ramp.rise >= 0.3); assert.equal(s.mouseSensitivity, 400); assert.equal(s.expo.pitch, 0.95);
   const b = setup({ storage });
   assert.equal(b.input.getSettings().throttleRate, 5);
 });
@@ -294,4 +297,30 @@ test('update con dt inválido no produce NaN', () => {
   input.update(NaN); input.update(-1); input.update(0); input.update(1e9);
   const c = input.getControls();
   for (const k of ['pitch', 'roll', 'yaw', 'throttle', 'brake']) assert.ok(Number.isFinite(c[k]), k);
+});
+
+test('mouse como palanca por defecto: cabeceo y alabeo, la palanca queda donde se la deja, zona muerta, Q y botón central centran', () => {
+  const t = setup(); const { win, input } = t;
+  assert.equal(input.mouseStick, true, 'activado por defecto');
+  t.setNow(1); mouseMove(win, 200, 120);                 // derecha y hacia atrás (hacia uno)
+  let c = input.getControls();
+  assert.ok(c.roll > 0.2 && c.pitch > 0.1, 'alabeo der. y proa arriba: ' + c.roll + ' ' + c.pitch);
+  for (let i = 0; i < 60; i++) { t.setNow(2 + i * 0.05); input.update(0.05); }
+  const c2 = input.getControls();
+  assert.equal(c2.roll, c.roll, 'sin recentrado: se mantiene'); assert.equal(c2.pitch, c.pitch);
+  assert.ok(c2.mouseStick === true && 'stickX' in c2, 'datos para el indicador del HUD');
+  down(win, 'KeyQ'); up(win, 'KeyQ');
+  c = input.getControls(); assert.equal(c.roll, 0); assert.equal(c.pitch, 0);
+  mouseMove(win, 8, 0); assert.equal(input.getControls().roll, 0, 'zona muerta (8 px de 400)');
+  mouseMove(win, 100, -100);
+  win.document.body.dispatchEvent(new win.MouseEvent('mousedown', { button: 1, bubbles: true }));
+  c = input.getControls(); assert.equal(c.roll, 0); assert.equal(c.pitch, 0, 'botón central centra');
+});
+
+test('ajustes guardados de la versión anterior (mouse apagado) se migran a mouse-palanca sin recentrado', () => {
+  const store = new Map([['a10.input.v1', JSON.stringify({ v: 1, bindings: {}, settings: { mouseStick: false, mouseRecenterRate: 2.2, mouseSensitivity: 350 } })]]);
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  const { input } = setup({ storage });
+  assert.equal(input.mouseStick, true);
+  assert.equal(input.getSettings().mouseRecenterRate, 0);
 });

@@ -93366,6 +93366,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     { id: "worldRelocate", label: "Reubicar c\xE1mara de mundo", group: "Vista", kind: "press", keys: ["KeyT"] },
     { id: "toggleHud", label: "Mostrar/ocultar HUD", group: "Vista", kind: "press", keys: ["KeyH"] },
     { id: "toggleMouse", label: "Mouse como palanca (on/off)", group: "Vista", kind: "press", keys: ["KeyM"] },
+    { id: "centerStick", label: "Centrar palanca del mouse (tambi\xE9n bot\xF3n central)", group: "Vuelo", kind: "press", keys: ["KeyQ"] },
     { id: "screenshot", label: "Captura de pantalla", group: "Sistema", kind: "press", keys: ["F2"] },
     { id: "pause", label: "Pausa / men\xFA", group: "Sistema", kind: "press", keys: ["KeyP", "Escape"] },
     { id: "reset", label: "Reiniciar", group: "Sistema", kind: "press", keys: ["KeyR"] }
@@ -93387,13 +93388,19 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       expo: { pitch: 0.45, roll: 0.35, yaw: 0.2 },
       throttleRate: 0.5,
       // 1/s con W/S
-      mouseStick: false,
-      mouseSensitivity: 350,
+      // Mouse como palanca (por defecto): el mouse mueve una palanca virtual de cabeceo (adelante/atrás) y alabeo
+      // (izq./der.) que QUEDA donde se la deja, como una palanca real; Q o el botón central la centran.
+      mouseStick: true,
+      mouseSensitivity: 400,
       // px de movimiento para deflexión total
       mouseRecenterDelay: 0.35,
-      // s sin mover antes de recentrar
-      mouseRecenterRate: 2.2,
-      // 1/s (decaimiento exponencial)
+      // s sin mover antes de recentrar (si mouseRecenterRate > 0)
+      mouseRecenterRate: 0,
+      // 1/s (decaimiento exponencial); 0 = la palanca se queda donde se la deja
+      mouseDeadzone: 0.03,
+      // zona muerta en el centro (fracción de la deflexión)
+      mouseExpo: 0.3,
+      // curva del mouse: más fino cerca del centro
       invertMouseY: false,
       lookSensitivity: 35e-4,
       // rad/px
@@ -93453,7 +93460,10 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           if (ACTION_IDS.has(id) && Array.isArray(cfg.bindings[id])) bindings[id] = cfg.bindings[id].filter((c) => typeof c === "string").slice(0, 4);
         }
       }
-      if (cfg.settings) applySettings(cfg.settings, false);
+      if (cfg.settings) {
+        const st0 = cfg.v === 1 ? { ...cfg.settings, mouseStick: true, mouseRecenterRate: 0, mouseSensitivity: 400 } : cfg.settings;
+        applySettings(st0, false);
+      }
     };
     const applySettings = (p, save = true) => {
       const s = settings, d = defaultInputSettings();
@@ -93471,6 +93481,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       if ("mouseRecenterDelay" in p) s.mouseRecenterDelay = clamp2(fin(p.mouseRecenterDelay, d.mouseRecenterDelay), 0, 3);
       if ("mouseRecenterRate" in p) s.mouseRecenterRate = clamp2(fin(p.mouseRecenterRate, d.mouseRecenterRate), 0, 20);
       if ("invertMouseY" in p) s.invertMouseY = !!p.invertMouseY;
+      if ("mouseDeadzone" in p) s.mouseDeadzone = clamp2(fin(p.mouseDeadzone, d.mouseDeadzone), 0, 0.3);
+      if ("mouseExpo" in p) s.mouseExpo = clamp2(fin(p.mouseExpo, d.mouseExpo), 0, 0.95);
       if ("lookSensitivity" in p) s.lookSensitivity = clamp2(fin(p.lookSensitivity, d.lookSensitivity), 5e-4, 0.02);
       if ("invertLookY" in p) s.invertLookY = !!p.invertLookY;
       if (save) persist();
@@ -93478,7 +93490,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const persist = () => {
       if (!storage) return;
       try {
-        storage.setItem(INPUT_STORAGE_KEY, JSON.stringify({ v: 1, bindings, settings }));
+        storage.setItem(INPUT_STORAGE_KEY, JSON.stringify({ v: 2, bindings, settings }));
       } catch {
       }
     };
@@ -93565,6 +93577,10 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         case "toggleMouse":
           api.setMouseStick(!settings.mouseStick);
           break;
+        case "centerStick":
+          st.mx = 0;
+          st.my = 0;
+          break;
         default:
           break;
       }
@@ -93627,9 +93643,16 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         rightDown = true;
         look.active = true;
         e.preventDefault && e.preventDefault();
+      } else if (e.button === 1) {
+        st.mx = 0;
+        st.my = 0;
+        if (e.preventDefault) e.preventDefault();
       } else if (e.button === 0) {
+        if (settings.mouseStick && !locked && pointerTarget && pointerTarget.requestPointerLock) {
+          requestLock();
+          return;
+        }
         if (settings.mouseStick || locked) st.mouseGun = true;
-        if (settings.mouseStick && !locked) requestLock();
       }
     };
     const onMouseUp = (e) => {
@@ -93740,8 +93763,17 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         if (!c.assist) c.assist = {};
         if (!c.trim) c.trim = {};
         const ex = settings.expo;
-        c.pitch = clamp2(expo2(st.pitch, ex.pitch) + st.my + st.xp, -1, 1);
-        c.roll = clamp2(expo2(st.roll, ex.roll) + st.mx + st.xr, -1, 1);
+        const mdz = (v) => {
+          const a = Math.abs(v), z = settings.mouseDeadzone;
+          return a <= z ? 0 : Math.sign(v) * expo2((a - z) / (1 - z), settings.mouseExpo);
+        };
+        const mp = mdz(st.my), mr = mdz(st.mx);
+        c.pitch = clamp2(expo2(st.pitch, ex.pitch) + mp + st.xp, -1, 1);
+        c.roll = clamp2(expo2(st.roll, ex.roll) + mr + st.xr, -1, 1);
+        c.mouseStick = settings.mouseStick;
+        c.mouseLocked = locked;
+        c.stickX = st.mx;
+        c.stickY = st.my;
         c.yaw = clamp2(expo2(st.yaw, ex.yaw) + st.xy, -1, 1);
         c.throttle = st.throttle;
         c.flaps = st.flaps;
@@ -94648,6 +94680,12 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       D.buffet = bf === true ? 1 : clamp4(num(bf), 0, 1);
       D.vel = Array.isArray(s.vel) ? s.vel : null;
       D.quat = Array.isArray(s.quat) ? s.quat : null;
+      D.mouseStick = !!(c && c.mouseStick);
+      D.mouseLocked = !!(c && c.mouseLocked);
+      D.stickX = clamp4(num(c && c.stickX), -1, 1);
+      D.stickY = clamp4(num(c && c.stickY), -1, 1);
+      D.cPitch = clamp4(num(c && c.pitch), -1, 1);
+      D.cRoll = clamp4(num(c && c.roll), -1, 1);
       if (D.fuel > S.fuelCap) S.fuelCap = D.fuel;
     };
     const extractExtra = (e) => {
@@ -95030,6 +95068,27 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         text(w.txt, cx, y + i * 28 * u, (w.sev === 2 ? 22 : 18) * u, color, "center", true);
       });
     };
+    const drawStick = (x, y, u) => {
+      if (!D.mouseStick) return;
+      const r = 34 * u;
+      ctx.fillStyle = P("rgba(0,10,5,0.35)");
+      ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+      line2(() => {
+        ctx.beginPath();
+        ctx.rect(x - r, y - r, 2 * r, 2 * r);
+        ctx.moveTo(x - 6 * u, y);
+        ctx.lineTo(x + 6 * u, y);
+        ctx.moveTo(x, y - 6 * u);
+        ctx.lineTo(x, y + 6 * u);
+      }, col, 1 * u);
+      const px2 = x + D.cRoll * r, py = y + D.cPitch * r;
+      line2(() => {
+        ctx.beginPath();
+        ctx.arc(px2, py, 5 * u, 0, Math.PI * 2);
+      }, col, 2 * u);
+      text("PALANCA", x, y - r - 6 * u, 10 * u, col, "center");
+      if (!D.mouseLocked) text("CLIC = TOMAR MOUSE \xB7 Q = CENTRAR", x, y + r + 14 * u, 10 * u, AMBER, "center");
+    };
     const drawReduced = (u) => {
       const W = S.W, H = S.H, bw = Math.min(W - 24, 880 * u), x0 = (W - bw) / 2, h = 62 * u, y0 = H - h - 12 * u;
       ctx.fillStyle = P("rgba(0,10,5,0.55)");
@@ -95062,6 +95121,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       text("COMB " + f0(D.fuel), gx - 4 * u, y0 + 51 * u, 10 * u, col, "left");
       drawWarnings(W / 2, 54 * u, u);
       if (X.has) drawAttack(W / 2, H / 2, u);
+      drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 20 * u, u);
     };
     const drawFull = (u) => {
       const W = S.W, H = S.H, cx = W / 2, cy = H * 0.5;
@@ -95078,6 +95138,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       drawEnginePanel(24 * u, by, u);
       if (X.has) drawWeaponPanel(cx, by + 6 * u, u);
       drawSystems(W - 24 * u, by + 12 * u, u);
+      drawStick(cx - 330 * u, by + 40 * u, u);
     };
     const api = {
       canvas,
@@ -95868,7 +95929,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         "div",
         {},
         h("h3", { text: "Ajustes de control" }),
-        row("Mouse como palanca", segment([{ v: "off", label: "No" }, { v: "on", label: "S\xED (tecla M)" }], s.mouseStick ? "on" : "off", (v) => set({ mouseStick: v === "on" }), "Mouse como palanca"), "Movimiento relativo con recentrado suave. Usa bloqueo del puntero."),
+        row("Mouse como palanca", segment([{ v: "off", label: "No" }, { v: "on", label: "S\xED (tecla M)" }], s.mouseStick ? "on" : "off", (v) => set({ mouseStick: v === "on" }), "Mouse como palanca"), "Mouse adelante/atr\xE1s = cabeceo, izq./der. = alabeo. La palanca queda donde la dej\xE1s; Q o el bot\xF3n central la centran. El primer clic toma el mouse."),
         row("Sensibilidad del mouse", slider({ min: 100, max: 1200, step: 25, value: s.mouseSensitivity, fmt: (v) => v + " px", label: "Sensibilidad del mouse", onInput: (v) => set({ mouseSensitivity: v }) }), "P\xEDxeles de recorrido para deflexi\xF3n total (menos = m\xE1s sensible)."),
         row("Recentrado del mouse", slider({ min: 0, max: 8, step: 0.2, value: s.mouseRecenterRate, fmt: (v) => v === 0 ? "sin recentrar" : comma(v, 1) + " /s", label: "Recentrado del mouse", onInput: (v) => set({ mouseRecenterRate: v }) })),
         row("Invertir eje Y del mouse", segment([{ v: "off", label: "No" }, { v: "on", label: "S\xED" }], s.invertMouseY ? "on" : "off", (v) => set({ invertMouseY: v === "on" }), "Invertir eje Y")),
@@ -95889,7 +95950,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       wrap.append(
         hintEl,
         keysBox,
-        h("p", { class: "sub", text: "Mouse: bot\xF3n izquierdo = ca\xF1\xF3n (con la palanca de mouse activa) \xB7 bot\xF3n derecho = mirar \xB7 rueda = distancia / zoom de c\xE1mara." }),
+        h("p", { class: "sub", text: "Mouse: mover = cabeceo y alabeo \xB7 bot\xF3n izquierdo = ca\xF1\xF3n \xB7 bot\xF3n central o Q = centrar palanca \xB7 bot\xF3n derecho = mirar \xB7 rueda = distancia / zoom de c\xE1mara." }),
         tuning,
         h("div", { class: "hz-actions" }, reset, backBtn())
       );
@@ -95984,7 +96045,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         "Resumen de mando, instrumentos y t\xE9cnica de ataque a tierra.",
         h("h3", { text: "Teclas actuales" }),
         h("table", {}, h("tbody", {}, rows)),
-        h("p", { text: "Mouse: bot\xF3n izquierdo = ca\xF1\xF3n (con la palanca de mouse activa o el puntero bloqueado) \xB7 bot\xF3n derecho = mirar \xB7 rueda = distancia o zoom \xB7 M = palanca con mouse (recentrado suave)." }),
+        h("p", { text: "Mouse (palanca, activada por defecto): adelante = proa abajo, atr\xE1s = proa arriba, izq./der. = alabeo. La palanca queda donde la dej\xE1s (indicador \xABPALANCA\xBB en el HUD); Q o el bot\xF3n central la centran. Primer clic = tomar el mouse; despu\xE9s, bot\xF3n izquierdo = ca\xF1\xF3n \xB7 bot\xF3n derecho = mirar \xB7 rueda = zoom \xB7 M = activar/desactivar \xB7 Esc = soltar el mouse y pausar." }),
         h("h3", { text: "Armas" }),
         h("p", { text: "Ca\xF1\xF3n GAU-8/A: manten\xE9 Espacio (o el bot\xF3n izquierdo del mouse). Lleva 1 150 cartuchos; al apretar el gatillo los ca\xF1ones tardan un instante en girar hasta la cadencia plena." }),
         h("p", { text: "Maverick AGM-65: L fija el blanco m\xE1s cercano al centro (puls\xE1 de nuevo para ciclar), U lo suelta, Enter dispara. El blanco fijado se marca con un diamante." }),

@@ -195,3 +195,12 @@ Sin `extra` no se dibuja nada de armas (ni panel de munición, ni pipper, ni rec
   - El fogonazo dura 45 ms.
   - En VR la cantidad baja a la mitad.
   - Los impactos levantan tierra y producen un destello.
+
+## 11. Cabeceo y alabeo con el mouse (por defecto)
+- `mouseStick: true` por defecto. Mouse adelante = proa abajo, atrás = proa arriba, izquierda/derecha = alabeo. Se suma al teclado.
+- La palanca **queda donde se la deja** (`mouseRecenterRate: 0`), como una palanca real. Se centra con **Q** (acción `centerStick`) o con el **botón central**. El recentrado automático sigue disponible en Controles.
+- Zona muerta del 3 % (`mouseDeadzone`) y curva `mouseExpo` 0,3 para tener precisión cerca del centro. Sensibilidad por defecto: 400 px para deflexión total.
+- El **primer clic** sobre la vista solo toma el mouse (bloqueo del puntero) y no dispara. Después, el botón izquierdo es el cañón. Esc suelta el mouse y pausa.
+- El HUD muestra el cuadro **PALANCA** con la posición de cabeceo y alabeo, y el aviso «CLIC = TOMAR MOUSE · Q = CENTRAR» mientras el puntero no está tomado.
+- `controls` agrega `mouseStick`, `mouseLocked`, `stickX` y `stickY` (solo para el HUD).
+- Los ajustes guardados con el formato anterior (`v: 1`, mouse apagado) se migran solos a mouse-palanca sin recentrado.

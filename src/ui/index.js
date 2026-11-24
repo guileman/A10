@@ -310,7 +310,7 @@ export function createUI({ root, engine = null, storage = null, input = null, do
     const set = (p) => input && input.setSettings(p);
     const tuning = !input ? h('div') : h('div', {},
       h('h3', { text: 'Ajustes de control' }),
-      row('Mouse como palanca', segment([{ v: 'off', label: 'No' }, { v: 'on', label: 'Sí (tecla M)' }], s.mouseStick ? 'on' : 'off', (v) => set({ mouseStick: v === 'on' }), 'Mouse como palanca'), 'Movimiento relativo con recentrado suave. Usa bloqueo del puntero.'),
+      row('Mouse como palanca', segment([{ v: 'off', label: 'No' }, { v: 'on', label: 'Sí (tecla M)' }], s.mouseStick ? 'on' : 'off', (v) => set({ mouseStick: v === 'on' }), 'Mouse como palanca'), 'Mouse adelante/atrás = cabeceo, izq./der. = alabeo. La palanca queda donde la dejás; Q o el botón central la centran. El primer clic toma el mouse.'),
       row('Sensibilidad del mouse', slider({ min: 100, max: 1200, step: 25, value: s.mouseSensitivity, fmt: (v) => v + ' px', label: 'Sensibilidad del mouse', onInput: (v) => set({ mouseSensitivity: v }) }), 'Píxeles de recorrido para deflexión total (menos = más sensible).'),
       row('Recentrado del mouse', slider({ min: 0, max: 8, step: 0.2, value: s.mouseRecenterRate, fmt: (v) => (v === 0 ? 'sin recentrar' : comma(v, 1) + ' /s'), label: 'Recentrado del mouse', onInput: (v) => set({ mouseRecenterRate: v }) })),
       row('Invertir eje Y del mouse', segment([{ v: 'off', label: 'No' }, { v: 'on', label: 'Sí' }], s.invertMouseY ? 'on' : 'off', (v) => set({ invertMouseY: v === 'on' }), 'Invertir eje Y')),
@@ -322,7 +322,7 @@ export function createUI({ root, engine = null, storage = null, input = null, do
       row('Velocidad de gases (W/S)', slider({ min: 0.1, max: 2, step: 0.05, value: s.throttleRate, fmt: (v) => comma(1 / v, 1) + ' s de 0 a 100 %', label: 'Velocidad de gases', onInput: (v) => set({ throttleRate: v }) })));
     const reset = btn('Restablecer teclas', () => { if (input) { input.resetBindings(); renderKeys(); toast('Teclas restablecidas'); } }, { cls: 'sm warn' });
     wrap.append(hintEl, keysBox,
-      h('p', { class: 'sub', text: 'Mouse: botón izquierdo = cañón (con la palanca de mouse activa) · botón derecho = mirar · rueda = distancia / zoom de cámara.' }), tuning,
+      h('p', { class: 'sub', text: 'Mouse: mover = cabeceo y alabeo · botón izquierdo = cañón · botón central o Q = centrar palanca · botón derecho = mirar · rueda = distancia / zoom de cámara.' }), tuning,
       h('div', { class: 'hz-actions' }, reset, backBtn()));
     const el = panel('Controles', null, wrap, footer());
     return { el, onLeave: () => { if (capturing) capturing.cancel(); } };
@@ -368,7 +368,7 @@ export function createUI({ root, engine = null, storage = null, input = null, do
     const rows = ACTIONS.filter((a) => b[a.id]).map((a) => h('tr', {}, h('td', { text: a.label }), h('td', {}, h('span', { class: 'hz-kbd', text: lab(a.id) }))));
     const el = panel('Ayuda', 'Resumen de mando, instrumentos y técnica de ataque a tierra.',
       h('h3', { text: 'Teclas actuales' }), h('table', {}, h('tbody', {}, rows)),
-      h('p', { text: 'Mouse: botón izquierdo = cañón (con la palanca de mouse activa o el puntero bloqueado) · botón derecho = mirar · rueda = distancia o zoom · M = palanca con mouse (recentrado suave).' }),
+      h('p', { text: 'Mouse (palanca, activada por defecto): adelante = proa abajo, atrás = proa arriba, izq./der. = alabeo. La palanca queda donde la dejás (indicador «PALANCA» en el HUD); Q o el botón central la centran. Primer clic = tomar el mouse; después, botón izquierdo = cañón · botón derecho = mirar · rueda = zoom · M = activar/desactivar · Esc = soltar el mouse y pausar.' }),
       h('h3', { text: 'Armas' }),
       h('p', { text: 'Cañón GAU-8/A: mantené Espacio (o el botón izquierdo del mouse). Lleva 1 150 cartuchos; al apretar el gatillo los cañones tardan un instante en girar hasta la cadencia plena.' }),
       h('p', { text: 'Maverick AGM-65: L fija el blanco más cercano al centro (pulsá de nuevo para ciclar), U lo suelta, Enter dispara. El blanco fijado se marca con un diamante.' }),

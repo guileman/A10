@@ -31,6 +31,7 @@ export const ACTIONS = [
   { id: 'worldRelocate', label: 'Reubicar cámara de mundo', group: 'Vista', kind: 'press', keys: ['KeyT'] },
   { id: 'toggleHud', label: 'Mostrar/ocultar HUD', group: 'Vista', kind: 'press', keys: ['KeyH'] },
   { id: 'toggleMouse', label: 'Mouse como palanca (on/off)', group: 'Vista', kind: 'press', keys: ['KeyM'] },
+  { id: 'centerStick', label: 'Centrar palanca del mouse (también botón central)', group: 'Vuelo', kind: 'press', keys: ['KeyQ'] },
   { id: 'screenshot', label: 'Captura de pantalla', group: 'Sistema', kind: 'press', keys: ['F2'] },
   { id: 'pause', label: 'Pausa / menú', group: 'Sistema', kind: 'press', keys: ['KeyP', 'Escape'] },
   { id: 'reset', label: 'Reiniciar', group: 'Sistema', kind: 'press', keys: ['KeyR'] },
@@ -53,10 +54,14 @@ export function defaultInputSettings() {
     // Curva exponencial del teclado: salida = (1-e)·v + e·v³ (e = 0: lineal). Solo para el teclado, no para mouse/VR.
     expo: { pitch: 0.45, roll: 0.35, yaw: 0.2 },
     throttleRate: 0.5,                  // 1/s con W/S
-    mouseStick: false,
-    mouseSensitivity: 350,              // px de movimiento para deflexión total
-    mouseRecenterDelay: 0.35,           // s sin mover antes de recentrar
-    mouseRecenterRate: 2.2,             // 1/s (decaimiento exponencial)
+    // Mouse como palanca (por defecto): el mouse mueve una palanca virtual de cabeceo (adelante/atrás) y alabeo
+    // (izq./der.) que QUEDA donde se la deja, como una palanca real; Q o el botón central la centran.
+    mouseStick: true,
+    mouseSensitivity: 400,              // px de movimiento para deflexión total
+    mouseRecenterDelay: 0.35,           // s sin mover antes de recentrar (si mouseRecenterRate > 0)
+    mouseRecenterRate: 0,               // 1/s (decaimiento exponencial); 0 = la palanca se queda donde se la deja
+    mouseDeadzone: 0.03,                // zona muerta en el centro (fracción de la deflexión)
+    mouseExpo: 0.3,                     // curva del mouse: más fino cerca del centro
     invertMouseY: false,
     lookSensitivity: 0.0035,            // rad/px
     invertLookY: false,
@@ -96,7 +101,10 @@ export function createInput(opts = {}) {
         if (ACTION_IDS.has(id) && Array.isArray(cfg.bindings[id])) bindings[id] = cfg.bindings[id].filter((c) => typeof c === 'string').slice(0, 4);
       }
     }
-    if (cfg.settings) applySettings(cfg.settings, false);
+    if (cfg.settings) {
+      const st0 = cfg.v === 1 ? { ...cfg.settings, mouseStick: true, mouseRecenterRate: 0, mouseSensitivity: 400 } : cfg.settings;
+      applySettings(st0, false);
+    }
   };
   const applySettings = (p, save = true) => {
     const s = settings, d = defaultInputSettings();
@@ -111,13 +119,15 @@ export function createInput(opts = {}) {
     if ('mouseRecenterDelay' in p) s.mouseRecenterDelay = clamp(fin(p.mouseRecenterDelay, d.mouseRecenterDelay), 0, 3);
     if ('mouseRecenterRate' in p) s.mouseRecenterRate = clamp(fin(p.mouseRecenterRate, d.mouseRecenterRate), 0, 20);
     if ('invertMouseY' in p) s.invertMouseY = !!p.invertMouseY;
+    if ('mouseDeadzone' in p) s.mouseDeadzone = clamp(fin(p.mouseDeadzone, d.mouseDeadzone), 0, 0.3);
+    if ('mouseExpo' in p) s.mouseExpo = clamp(fin(p.mouseExpo, d.mouseExpo), 0, 0.95);
     if ('lookSensitivity' in p) s.lookSensitivity = clamp(fin(p.lookSensitivity, d.lookSensitivity), 0.0005, 0.02);
     if ('invertLookY' in p) s.invertLookY = !!p.invertLookY;
     if (save) persist();
   };
   const persist = () => {
     if (!storage) return;
-    try { storage.setItem(INPUT_STORAGE_KEY, JSON.stringify({ v: 1, bindings, settings })); } catch { /* cuota/privado */ }
+    try { storage.setItem(INPUT_STORAGE_KEY, JSON.stringify({ v: 2, bindings, settings })); } catch { /* cuota/privado */ }
   };
   try {
     const t = storage && storage.getItem(INPUT_STORAGE_KEY);
@@ -171,6 +181,7 @@ export function createInput(opts = {}) {
       case 'parkingBrake': st.parkingBrake = !st.parkingBrake; break;
       case 'speedbrake': st.speedbrake = !st.speedbrake; break;
       case 'toggleMouse': api.setMouseStick(!settings.mouseStick); break;
+      case 'centerStick': st.mx = 0; st.my = 0; break;
       default: break;
     }
     emit('action', EMIT[id] || id);
@@ -227,10 +238,11 @@ export function createInput(opts = {}) {
   const onMouseDown = (e) => {
     if (!enabled) return;
     if (e.button === 2) { rightDown = true; look.active = true; e.preventDefault && e.preventDefault(); }
+    else if (e.button === 1) { st.mx = 0; st.my = 0; if (e.preventDefault) e.preventDefault(); }
     else if (e.button === 0) {
-      // botón izquierdo = cañón, solo con el mouse-palanca activo o el puntero bloqueado (no dispara al clicar en menús)
+      // botón izquierdo = cañón con el puntero tomado. El primer clic solo toma el mouse (no dispara).
+      if (settings.mouseStick && !locked && pointerTarget && pointerTarget.requestPointerLock) { requestLock(); return; }
       if (settings.mouseStick || locked) st.mouseGun = true;
-      if (settings.mouseStick && !locked) requestLock();
     }
   };
   const onMouseUp = (e) => { if (e.button === 2) { rightDown = false; look.active = false; } else if (e.button === 0) st.mouseGun = false; };
@@ -311,8 +323,11 @@ export function createInput(opts = {}) {
       if (!c.assist) c.assist = {};
       if (!c.trim) c.trim = {};
       const ex = settings.expo;
-      c.pitch = clamp(expo(st.pitch, ex.pitch) + st.my + st.xp, -1, 1);
-      c.roll = clamp(expo(st.roll, ex.roll) + st.mx + st.xr, -1, 1);
+      const mdz = (v) => { const a = Math.abs(v), z = settings.mouseDeadzone; return a <= z ? 0 : Math.sign(v) * expo((a - z) / (1 - z), settings.mouseExpo); };
+      const mp = mdz(st.my), mr = mdz(st.mx);
+      c.pitch = clamp(expo(st.pitch, ex.pitch) + mp + st.xp, -1, 1);
+      c.roll = clamp(expo(st.roll, ex.roll) + mr + st.xr, -1, 1);
+      c.mouseStick = settings.mouseStick; c.mouseLocked = locked; c.stickX = st.mx; c.stickY = st.my;
       c.yaw = clamp(expo(st.yaw, ex.yaw) + st.xy, -1, 1);
       c.throttle = st.throttle;
       c.flaps = st.flaps;

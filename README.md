@@ -4,6 +4,8 @@
 
 Simulador del A-10C sobre mapa real (satélite + relieve + OSM). Empieza en vuelo; el objetivo es un convoy (tanques, blindados y camiones) que recorre una ruta A→B. Armas: cañón GAU-8/A y AGM-65 Maverick. Física de cuerpo rígido con dos TF34 (`docs/PHYSICS_A10.md`), menús y HUD (`docs/UI.md`), malla (`docs/MESH.md`), VR por WebXR (Quest 2 / Rift S).
 
+Mouse (por defecto): adelante/atrás = cabeceo, izq./der. = alabeo; la palanca queda donde la dejás (indicador «PALANCA» en el HUD); Q o botón central = centrar; primer clic = tomar el mouse, luego botón izq. = cañón; M activa/desactiva.
+
 Armas: Espacio = cañón · L = bloquear · Enter = Maverick · U = desbloquear · K = aerofreno · C = cámara · P/Esc = pausa.
 VR: gatillo derecho = cañón · A = misil · B = bloquear.
 

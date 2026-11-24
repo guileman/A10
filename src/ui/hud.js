@@ -123,6 +123,9 @@ export function createHud({ canvas, ctx: injectedCtx = null, options = null } = 
     D.stall = !!(s.stall || flags.stalled || D.warn.includes('STALL'));
     const bf = s.buffet; D.buffet = bf === true ? 1 : clamp(num(bf), 0, 1);
     D.vel = Array.isArray(s.vel) ? s.vel : null; D.quat = Array.isArray(s.quat) ? s.quat : null;
+    D.mouseStick = !!(c && c.mouseStick); D.mouseLocked = !!(c && c.mouseLocked);
+    D.stickX = clamp(num(c && c.stickX), -1, 1); D.stickY = clamp(num(c && c.stickY), -1, 1);
+    D.cPitch = clamp(num(c && c.pitch), -1, 1); D.cRoll = clamp(num(c && c.roll), -1, 1);
     if (D.fuel > S.fuelCap) S.fuelCap = D.fuel;
   };
   const extractExtra = (e) => {
@@ -446,6 +449,18 @@ export function createHud({ canvas, ctx: injectedCtx = null, options = null } = 
     });
   };
 
+  /** Indicador de la palanca (mouse): cuadro con la posición actual; + = palanca atrás (abajo en el cuadro). */
+  const drawStick = (x, y, u) => {
+    if (!D.mouseStick) return;
+    const r = 34 * u;
+    ctx.fillStyle = P('rgba(0,10,5,0.35)'); ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+    line2(() => { ctx.beginPath(); ctx.rect(x - r, y - r, 2 * r, 2 * r); ctx.moveTo(x - 6 * u, y); ctx.lineTo(x + 6 * u, y); ctx.moveTo(x, y - 6 * u); ctx.lineTo(x, y + 6 * u); }, col, 1 * u);
+    const px = x + D.cRoll * r, py = y + D.cPitch * r;
+    line2(() => { ctx.beginPath(); ctx.arc(px, py, 5 * u, 0, Math.PI * 2); }, col, 2 * u);
+    text('PALANCA', x, y - r - 6 * u, 10 * u, col, 'center');
+    if (!D.mouseLocked) text('CLIC = TOMAR MOUSE · Q = CENTRAR', x, y + r + 14 * u, 10 * u, AMBER, 'center');
+  };
+
   const drawReduced = (u) => {
     const W = S.W, H = S.H, bw = Math.min(W - 24, 880 * u), x0 = (W - bw) / 2, h = 62 * u, y0 = H - h - 12 * u;
     ctx.fillStyle = P('rgba(0,10,5,0.55)'); ctx.fillRect(x0, y0, bw, h);
@@ -470,6 +485,7 @@ export function createHud({ canvas, ctx: injectedCtx = null, options = null } = 
     text('COMB ' + f0(D.fuel), gx - 4 * u, y0 + 51 * u, 10 * u, col, 'left');
     drawWarnings(W / 2, 54 * u, u);
     if (X.has) drawAttack(W / 2, H / 2, u);
+    drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 20 * u, u);
   };
 
   const drawFull = (u) => {
@@ -488,6 +504,7 @@ export function createHud({ canvas, ctx: injectedCtx = null, options = null } = 
     drawEnginePanel(24 * u, by, u);
     if (X.has) drawWeaponPanel(cx, by + 6 * u, u);
     drawSystems(W - 24 * u, by + 12 * u, u);
+    drawStick(cx - 330 * u, by + 40 * u, u);
   };
 
   const api = {
