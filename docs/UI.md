@@ -212,4 +212,4 @@ Sin `extra` no se dibuja nada de armas (ni panel de munición, ni pipper, ni rec
 - **Cámara**: fija a la altura de los ojos (1,8 m sobre el terreno), 50 m detrás del blanco visto desde el avión y 26 m al costado. Así el blanco queda en primer plano y el avión llega de frente. `frameShot` orienta la cámara y elige el FOV (8–75°) para que entren el avión y el blanco: teleobjetivo con el avión lejos y gran angular cuando pasa. Si no entran los dos, se privilegia el blanco. La orientación y el FOV se suavizan con una constante de 0,22 s.
 - **Sonido**: se escucha desde la cámara de suelo, con el retardo distancia/c del «BRRRT», los impactos y las explosiones. Se ven las trazadoras y los impactos antes de oír el cañón.
 - Al entrar y al salir se limpian las partículas. Los vehículos destruidos vuelven a estar enteros mientras la repetición transcurre antes de su derribo, y al salir se restaura el estado real.
-- En VR no está disponible: la cámara forzada maree.
+- En VR no está disponible: la cámara forzada marea.
