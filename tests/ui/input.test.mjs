@@ -86,7 +86,7 @@ test('sin toberas, agua ni preajustes: esas teclas no hacen nada', () => {
   const { win, input } = setup();
   const got = [];
   input.on('action', (n) => got.push(n));
-  for (const c of ['KeyZ', 'KeyX', 'Digit1', 'Digit2', 'Digit3', 'KeyI']) { down(win, c); up(win, c); }
+  for (const c of ['KeyZ', 'Digit1', 'Digit2', 'Digit3', 'KeyI']) { down(win, c); up(win, c); }
   assert.deepEqual(got, []);
   for (const id of ['nozzleAft', 'nozzleDown', 'nozzlePreset1', 'water']) assert.ok(!ACTIONS.find((a) => a.id === id), id);
 });
@@ -323,4 +323,11 @@ test('ajustes guardados de la versión anterior (mouse apagado) se migran a mous
   const { input } = setup({ storage });
   assert.equal(input.mouseStick, true);
   assert.equal(input.getSettings().mouseRecenterRate, 0);
+});
+
+test('X pide la repetición del último impacto', () => {
+  const { win, input } = setup(); const got = [];
+  input.on('action', (n) => got.push(n));
+  down(win, 'KeyX'); up(win, 'KeyX');
+  assert.deepEqual(got, ['replay']);
 });

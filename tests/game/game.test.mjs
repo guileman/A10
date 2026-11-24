@@ -63,3 +63,39 @@ test('misil bloqueado alcanza un blanco en movimiento', () => {
   assert.equal(c.vehicles[0].state, 'burning', 'el tanque no fue destruido');
   assert.equal(w.missilesLeft(), 1);
 });
+
+import { createRecorder, createMoments, groundCameraPos, frameShot } from '../../src/game/replay.js';
+
+test('repetición: el grabador guarda ~14 s y encuentra el cuadro por tiempo', () => {
+  const rec = createRecorder({ seconds: 14 });
+  const s = { pos: [0, 100, 0], quat: [0, 0, 0, 1], vel: [150, 0, 0], controlSurfaces: {}, engine: {}, air: { tempK: 288 }, gear: {} };
+  const W = { rounds: [{ pos: [1, 2, 3], vel: [900, 0, 0] }], missiles: [], pylons: [{ loaded: true }, { loaded: false }], firing: true, spin: 1 };
+  const C = { vehicles: [{ pos: [10, 0, 10], heading: 1, state: 'moving', burnT: 0 }] };
+  for (let i = 0; i <= 1000; i++) { s.pos[0] = i; rec.push(i / 50, s, [0, 0, 0], W, C, i === 500 ? [{ type: 'kill', pos: [5, 0, 5] }] : null); }
+  assert.ok(rec.end - rec.start <= 14 + 1e-9 && rec.end - rec.start > 13.9, 'ventana de 14 s');
+  const f = rec.frames[rec.indexAt(10)];
+  assert.equal(f.t, 10); assert.equal(f.ac.pos[0], 500, 'copia, no referencia');
+  assert.equal(f.fx[0].type, 'kill'); assert.equal(f.pyl, 1); assert.equal(f.rounds[3], 900); assert.equal(f.vstate[0], 'moving');
+  assert.equal(rec.indexAt(-5), 0); assert.equal(rec.indexAt(1e9), rec.frames.length - 1);
+});
+
+test('repetición: momentos cercanos se fusionan y gana el derribo', () => {
+  const M = createMoments();
+  M.add('burst', 10, [0, 0, 0]); M.add('kill', 11, [5, 0, 5]); M.add('burst', 12, [9, 0, 9]);
+  assert.equal(M.list.length, 1); assert.equal(M.last().kind, 'kill'); assert.deepEqual(M.last().pos, [5, 0, 5]);
+  M.add('explosion', 20, [1, 0, 1]); assert.equal(M.list.length, 2);
+});
+
+test('repetición: la cámara de suelo queda detrás del blanco, a la altura de los ojos, y encuadra avión y blanco', () => {
+  const P = [0, 50, 0], A = [3000, 900, 0];
+  const C = groundCameraPos(P, A, () => 50);
+  assert.equal(C[1], 51.8);
+  assert.ok(C[0] < P[0] - 30, 'detrás del blanco visto desde el avión');
+  const sh = frameShot(C, A, P);
+  const ang = (u, v) => Math.acos(u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) * 180 / Math.PI;
+  const unit = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+  const dA = unit([A[0] - C[0], A[1] - C[1], A[2] - C[2]]), dP = unit([P[0] - C[0], P[1] + 1.5 - C[1], P[2] - C[2]]);
+  assert.ok(ang(sh.dir, dA) < sh.fovDeg / 2 && ang(sh.dir, dP) < sh.fovDeg / 2, 'los dos dentro del cuadro (FOV ' + sh.fovDeg.toFixed(1) + '°)');
+  const near = frameShot(C, [10, 120, 0], P);
+  assert.ok(near.fovDeg > sh.fovDeg, 'se abre cuando el avión pasa cerca');
+});

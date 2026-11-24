@@ -5,6 +5,7 @@ import A10_GEOMETRY from './physics/a10.geometry.json';
 import { createConvoy } from './game/targets.js';
 import { WeaponSystem } from './game/weapons.js';
 import { createCombatView, toScreen } from './game/render.js';
+import { createRecorder, createMoments, groundCameraPos, frameShot } from './game/replay.js';
 import { loadA10Model } from './aircraft/a10model.js';
 import { routePath, areaOptions, routeFrame, physicsWorld } from './world/area.js';
 import { createInput } from './input/index.js';
@@ -79,7 +80,7 @@ async function startFlight(cfg) {
     rig.setMode(cfg.camera || 'pilot');
     const vr = createVR({ renderer: scene.renderer, scene: scene.scene, camera: scene.camera, input, hudOptions: { scale: 1, color: (cfg.hud && cfg.hud.color) || 'verde' } });
     vr.onAction = (n) => weaponAction(n);
-    game = { vr, cfg, world, pw, aoi, scene, model, sim, rig, rf, weapons, combat, convoy: null, paused: false, last: performance.now(), t: 0, focus: new Vector3(), crashT: 0 };
+    game = { vr, cfg, world, pw, aoi, scene, model, sim, rig, rf, weapons, combat, convoy: null, paused: false, last: performance.now(), t: 0, focus: new Vector3(), crashT: 0, rec: createRecorder({ seconds: 14 }), moments: createMoments(), burst: { pts: [], hits: 0, lastT: -1 }, replay: null };
     resetFlight();
     ui.hud.setMode(rig.mode);
     window.__a10 = window.__harrier = game;
@@ -100,6 +101,8 @@ function resetFlight() {
   g.combat.dispose(); g.combat = createCombatView(g.scene.scene, { maverickTemplate: g.model.maverickTemplate });
   g.convoy = createConvoy({ route: rf.points.length >= 2 ? rf.points : [rf.a, rf.b], count: mission.convoySize ?? 8, mix: mission.mix || 'mixto', seed: (Date.now() & 0xffff), world: g.pw, speed: 10 });
   weapons.reset({ mavericks: (mission.loadout && mission.loadout.mavericks) ?? 4 });
+  if (g.replay) endReplay(g);
+  g.rec.clear(); g.moments.clear(); g.burst = { pts: [], hits: 0, lastT: -1 }; hideReplayBadge();
   g.model.setPylons(weapons.pylons);
   sim.setStores(weapons.stores());
   // posición inicial: a distancia del convoy, de frente a él, dentro del área
@@ -157,15 +160,25 @@ function buildExtra(g, s, cam) {
   return extra;
 }
 
-const impactList = [];
+const impactList = [], frameFx = [];
 function handleEvents(g, s, camPos, mode) {
   const tK = s.air && s.air.tempK;
-  impactList.length = 0;
+  impactList.length = 0; frameFx.length = 0;
   for (const e of g.weapons.drainEvents()) {
     const d = e.pos ? Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]) : 0;
-    if (e.type === 'impact') { g.combat.impact(e.pos, false); impactList.push({ pos: e.pos, hit: false }); }
-    else if (e.type === 'hit') { g.combat.impact(e.pos, true); impactList.push({ pos: e.pos, hit: true }); }
-    else if (e.type === 'explosion') { g.combat.explosion(e.pos, 1.2); audio.event('explosion', d, tK); }
+    if (e.type === 'impact' || e.type === 'hit') {
+      const hit = e.type === 'hit';
+      g.combat.impact(e.pos, hit); impactList.push({ pos: e.pos, hit }); frameFx.push(e);
+      g.burst.pts.push(e.pos); if (hit) g.burst.hits++; g.burst.lastT = g.t;
+    } else if (e.type === 'explosion') { g.combat.explosion(e.pos, 1.2); audio.event('explosion', d, tK); frameFx.push(e); offerReplay(g.moments.add('explosion', g.t, e.pos)); }
+  }
+  // fin de una ráfaga con impactos (1 s sin impactos nuevos) => momento repetible en el centro de los impactos
+  const B = g.burst;
+  if (B.pts.length && g.t - B.lastT > 1.0) {
+    const c = [0, 0, 0]; for (const p of B.pts) { c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; }
+    c[0] /= B.pts.length; c[1] /= B.pts.length; c[2] /= B.pts.length;
+    if (B.pts.length >= 5) offerReplay(g.moments.add('burst', B.lastT, c));
+    g.burst = { pts: [], hits: 0, lastT: -1 };
   }
   // cada impacto de 30 mm HEI suena cuando su onda llega al oyente (distancia / c)
   if (impactList.length) audio.impacts(impactList, camPos, tK, mode);
@@ -173,6 +186,8 @@ function handleEvents(g, s, camPos, mode) {
     if (e.type === 'kill') {
       const d = Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]);
       g.combat.explosion(e.pos, e.vehicle.type === 'tank' ? 1.5 : 1); audio.event('explosion', d, s.air && s.air.tempK);
+      frameFx.push({ type: 'kill', pos: e.pos, size: e.vehicle.type === 'tank' ? 1.5 : 1 });
+      offerReplay(g.moments.add('kill', g.t, e.pos));
       const left = g.convoy.alive().length;
       ui.toast(left ? `${e.vehicle.type === 'tank' ? 'Tanque' : e.vehicle.type === 'apc' ? 'Blindado' : 'Camión'} destruido — quedan ${left}` : '¡Convoy destruido! (R para otra misión)', 2500);
     } else if (e.type === 'alert') ui.toast('El convoy se detiene y se dispersa', 2000);
@@ -215,10 +230,122 @@ function supersonicCracks(g, camPos) {
   }
 }
 
+// ======================= Repetición desde una cámara en el suelo =======================
+const replayBadge = document.createElement('div');
+replayBadge.style.cssText = 'display:none;position:fixed;left:50%;top:150px;transform:translateX(-50%);z-index:40;padding:6px 14px;font:700 15px ui-monospace,monospace;letter-spacing:.08em;color:#ffcf4a;background:rgba(0,0,0,.45);border:1px solid #ffcf4a;border-radius:6px;pointer-events:none';
+document.body.appendChild(replayBadge);
+const replayOverlay = document.createElement('div');
+replayOverlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:39;pointer-events:none;font:700 16px ui-monospace,monospace;color:#fff;text-shadow:0 1px 3px #000';
+replayOverlay.innerHTML = '<div style="position:absolute;left:22px;top:18px"><span style="color:#ff4040">●</span> REPETICIÓN · CÁMARA DE SUELO <span data-k="t"></span></div><div style="position:absolute;left:22px;bottom:18px;font-weight:500;font-size:13px;opacity:.85">X o Esc = volver al vuelo</div><div style="position:absolute;inset:0;border:3px solid rgba(255,64,64,.5)"></div>';
+document.body.appendChild(replayOverlay);
+let badgeTimer = 0;
+const KIND_TXT = { kill: 'BLANCO DESTRUIDO', explosion: 'IMPACTO DE MAVERICK', burst: 'RÁFAGA' };
+function offerReplay(m) {
+  if (!m || !game || (game.vr && game.vr.presenting)) return;
+  replayBadge.textContent = `▶ ${KIND_TXT[m.kind] || 'IMPACTO'} — X = VER REPETICIÓN`;
+  replayBadge.style.display = 'block';
+  clearTimeout(badgeTimer); badgeTimer = setTimeout(hideReplayBadge, 10000);
+}
+function hideReplayBadge() { replayBadge.style.display = 'none'; }
+
+function startReplay(g) {
+  if (g.vr && g.vr.presenting) { ui.toast('La repetición no está disponible en VR', 2000); return; }
+  const m = g.moments.last(), rec = g.rec;
+  if (!m || rec.frames.length < 10 || m.t < rec.start) { ui.toast('Todavía no hay ningún impacto para repetir', 2000); return; }
+  const t0 = Math.max(rec.start, m.t - 6.5), t1 = Math.min(rec.end, m.t + 4.5);
+  const f0 = rec.frames[rec.indexAt(t0)];
+  const C = groundCameraPos(m.pos, f0.ac.pos, (x, z) => g.pw.height(x, z), { bounds: g.world.bounds });
+  const cam = g.scene.camera;
+  g.replay = {
+    t0, t1, t: t0, idx: rec.indexAt(t0) - 1, m, C, hold: 0, dir: null, fov: null,
+    saved: {
+      veh: g.convoy.vehicles.map((v) => ({ pos: v.pos.slice(), heading: v.heading, state: v.state, burnT: v.burnT })),
+      pyl: g.weapons.pylons.map((p) => p.loaded), fov: cam.fov, hud: ui.hud.visible,
+    },
+    proxy: { rounds: [], missiles: [], pool: [], mprox: new Map() },
+  };
+  hideReplayBadge();
+  g.combat.clearFx();
+  ui.hud.setVisible(false);
+  g.model.setFirstPerson(false);
+  audio.gun(0, false, { mode: 'world' });
+  replayOverlay.style.display = 'block'; vrBtn.style.visibility = 'hidden';
+}
+
+function endReplay(g) {
+  const R = g.replay; if (!R) return;
+  g.convoy.vehicles.forEach((v, i) => { const s0 = R.saved.veh[i]; if (!s0) return; v.pos[0] = s0.pos[0]; v.pos[1] = s0.pos[1]; v.pos[2] = s0.pos[2]; v.heading = s0.heading; v.state = s0.state; v.burnT = s0.burnT; });
+  g.weapons.pylons.forEach((p, i) => { p.loaded = R.saved.pyl[i]; });
+  g.combat.clearFx(); g.combat.syncVehicles(g.convoy);
+  const cam = g.scene.camera; cam.fov = R.saved.fov; cam.updateProjectionMatrix();
+  ui.hud.setVisible(R.saved.hud);
+  audio.gun(0, false, { mode: g.rig.mode });
+  replayOverlay.style.display = 'none'; vrBtn.style.visibility = '';
+  g.replay = null; g.last = performance.now();
+}
+
+const _look = new Vector3(), shot = { dir: [0, 0, -1], fovDeg: 40 }, rMuzzle = [0, 0, 0], rDir = [0, 0, 0];
+function replayStep(g, dt) {
+  const R = g.replay, rec = g.rec, F = rec.frames;
+  R.t = Math.min(R.t + dt, R.t1);
+  const idx = rec.indexAt(R.t), C = R.C, tK = F[idx].ac.air.tempK;
+  // efectos de los cuadros que se atravesaron (impactos, explosiones), con su sonido desde la cámara de suelo
+  impactList.length = 0;
+  for (let i = Math.max(0, R.idx + 1); i <= idx; i++) {
+    const fx = F[i].fx; if (!fx) continue;
+    for (const e of fx) {
+      const d = Math.hypot(e.pos[0] - C[0], e.pos[1] - C[1], e.pos[2] - C[2]);
+      if (e.type === 'impact' || e.type === 'hit') { g.combat.impact(e.pos, e.type === 'hit'); impactList.push({ pos: e.pos, hit: e.type === 'hit' }); }
+      else if (e.type === 'explosion') { g.combat.explosion(e.pos, 1.2); audio.event('explosion', d, tK); }
+      else if (e.type === 'kill') { g.combat.explosion(e.pos, e.size || 1); audio.event('explosion', d, tK); }
+    }
+  }
+  if (impactList.length) audio.impacts(impactList, C, tK, 'world');
+  R.idx = idx;
+  const f = F[idx], ac = f.ac;
+  // estado del mundo en ese instante
+  g.model.update(ac, ac.cgModel);
+  g.convoy.vehicles.forEach((v, i) => { const o = i * 5; if (o + 4 >= f.veh.length) return; v.pos[0] = f.veh[o]; v.pos[1] = f.veh[o + 1]; v.pos[2] = f.veh[o + 2]; v.heading = f.veh[o + 3]; v.burnT = f.veh[o + 4]; v.state = f.vstate[i]; });
+  g.weapons.pylons.forEach((p, i) => { p.loaded = !!(f.pyl & (1 << i)); });
+  const P = R.proxy, n = f.rounds.length / 6;
+  P.rounds.length = 0;
+  for (let i = 0; i < n; i++) {
+    const r = P.pool[i] || (P.pool[i] = { pos: [0, 0, 0], vel: [0, 0, 0] }), o = i * 6;
+    r.pos[0] = f.rounds[o]; r.pos[1] = f.rounds[o + 1]; r.pos[2] = f.rounds[o + 2]; r.vel[0] = f.rounds[o + 3]; r.vel[1] = f.rounds[o + 4]; r.vel[2] = f.rounds[o + 5];
+    P.rounds.push(r);
+  }
+  P.missiles.length = 0;
+  for (const m of f.missiles) {
+    let q = P.mprox.get(m.ref); if (!q) { q = { alive: true }; P.mprox.set(m.ref, q); }
+    q.pos = m.pos; q.dir = m.dir; q.motor = m.motor; P.missiles.push(q);
+  }
+  // cámara fija en el suelo, encuadrando avión y blanco (suavizado)
+  const cam = g.scene.camera;
+  frameShot(C, ac.pos, R.m.pos, shot);
+  const k = R.dir ? 1 - Math.exp(-dt / 0.22) : 1;
+  if (!R.dir) { R.dir = shot.dir.slice(); R.fov = shot.fovDeg; }
+  for (let i = 0; i < 3; i++) R.dir[i] += (shot.dir[i] - R.dir[i]) * k;
+  R.fov += (shot.fovDeg - R.fov) * k;
+  cam.position.set(C[0], C[1], C[2]); cam.up.set(0, 1, 0);
+  cam.lookAt(_look.set(C[0] + R.dir[0], C[1] + R.dir[1], C[2] + R.dir[2]));
+  cam.fov = R.fov; cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+  g.scene.update(dt, cam.position);
+  // combate, humo del cañón y sonido (con el retardo de la distancia a la cámara)
+  g.combat.syncVehicles(g.convoy);
+  const muzzle = g.weapons._worldPoint(ac, g.weapons.muzzle, rMuzzle); bodyX(ac.quat, rDir);
+  g.combat.gunFire(dt, f.firing, muzzle, rDir, ac.vel, 1);
+  g.combat.update(dt, P, g.convoy);
+  audio.update(ac, controlsObj, dt, { mode: 'world', camPos: C });
+  audio.gun(f.spin, f.firing, { mode: 'world', camPos: C, srcPos: muzzle, tempK: tK });
+  const el = replayOverlay.querySelector('[data-k="t"]'); if (el) el.textContent = (R.t - R.m.t >= 0 ? '+' : '−') + Math.abs(R.t - R.m.t).toFixed(1) + ' s';
+  if (R.t >= R.t1) { R.hold += dt; if (R.hold > 2.0) endReplay(g); }
+}
+
 function loop(now) {
   if (!game) return;
   const g = game; let dt = Math.min(0.1, Math.max(0, (now - g.last) / 1000)); g.last = now; g.lastDt = dt;
-  if (!g.paused) {
+  if (g.replay) replayStep(g, dt);
+  else if (!g.paused) {
     input.update(dt);
     const c = input.getControls(controlsObj);
     if (g.vr.presenting && g.vr.gun) c.triggerGun = true;
@@ -261,6 +388,7 @@ function loop(now) {
     g.combat.update(dt, g.weapons, g.convoy);
     handleEvents(g, s, camPos, mode);
     if (mode !== 'pilot') supersonicCracks(g, camPos);
+    g.rec.push(g.t, s, s.cgModel || g.sim.cg, g.weapons, g.convoy, frameFx);
     audio.update(s, c, dt, { mode, camPos });
     audio.gun(g.weapons.spin, g.weapons.firing, { mode, camPos, srcPos: muzzle, tempK: s.air && s.air.tempK });
     if (inVR && g.vr.rumble) { if (g.weapons.firing) g.vr.rumble(1, 60); else if (g.weapons.spin > 0.05) g.vr.rumble(0.15 * g.weapons.spin, 40); }
@@ -314,7 +442,9 @@ addEventListener('keydown', (ev) => { if (ev.code === 'KeyN' && !ev.repeat && ga
 ui.on('quality', () => {});
 input.on('action', (n) => {
   if (!game) return;
-  if (n === 'pause') { game.paused = true; audio.stop(); ui.showPause(); }
+  if (game.replay) { if (n === 'pause' || n === 'replay') endReplay(game); return; }
+  if (n === 'replay') startReplay(game);
+  else if (n === 'pause') { game.paused = true; audio.stop(); ui.showPause(); }
   else if (n === 'reset') { resetFlight(); audio.reset(); }
   else if (n === 'cameraNext') { game.rig.next(); ui.hud.setMode(game.rig.mode); }
   else if (n === 'worldRelocate') game.rig.relocate();

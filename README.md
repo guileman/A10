@@ -7,6 +7,8 @@ Simulador del A-10C sobre mapa real (satélite + relieve + OSM). Empieza en vuel
 Mouse (por defecto): adelante/atrás = cabeceo, izq./der. = alabeo; la palanca queda donde la dejás (indicador «PALANCA» en el HUD); Q o botón central = centrar; primer clic = tomar el mouse, luego botón izq. = cañón; M activa/desactiva.
 
 Armas: Espacio = cañón · L = bloquear · Enter = Maverick · U = desbloquear · K = aerofreno · C = cámara · P/Esc = pausa.
+Repetición: tras un derribo, un impacto de Maverick o una ráfaga con impactos aparece «X = VER REPETICIÓN»; X muestra los últimos segundos desde una cámara fija en el suelo junto al blanco (con el sonido llegando con su retardo). X o Esc vuelven al vuelo.
+
 VR: gatillo derecho = cañón · A = misil · B = bloquear.
 
 Compilar: `npm install && npm run build` → `dist/a10-sim.html` (copiado en la raíz como `index.html` para GitHub Pages).

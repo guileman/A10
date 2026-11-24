@@ -108,15 +108,29 @@ export function createCombatView(scene, { maverickTemplate = null } = {}) {
   api.syncVehicles = (convoy) => {
     for (const v of convoy.vehicles) {
       let m = vehMeshes.get(v);
-      if (!m) { m = buildVehicle(v.type); root.add(m); vehMeshes.set(v, m); m.userData.burnt = false; }
+      if (!m) {
+        m = buildVehicle(v.type); root.add(m); vehMeshes.set(v, m); m.userData.burnt = false;
+        m.userData.mats = m.userData.parts.map((p) => p.material);
+        if (m.userData.turret) { m.userData.turretPos = m.userData.turret.position.clone(); m.userData.turretRot = m.userData.turret.rotation.clone(); }
+      }
       m.position.set(v.pos[0], v.pos[1], v.pos[2]);
       m.rotation.set(0, v.heading, 0);
-      if ((v.state === 'burning' || v.state === 'destroyed') && !m.userData.burnt) {
+      const dead = v.state === 'burning' || v.state === 'destroyed';
+      if (dead && !m.userData.burnt) {
         m.userData.burnt = true;
         for (const p of m.userData.parts) p.material = BURNT;
         if (m.userData.turret) { m.userData.turret.rotation.set(0.25, 0.6, 0.1); m.userData.turret.position.y += 0.3; }
+      } else if (!dead && m.userData.burnt) {
+        // repetición: el vehículo vuelve a estar entero
+        m.userData.burnt = false;
+        m.userData.parts.forEach((p, i) => { p.material = m.userData.mats[i]; });
+        if (m.userData.turret) { m.userData.turret.position.copy(m.userData.turretPos); m.userData.turret.rotation.copy(m.userData.turretRot); }
       }
     }
+  };
+  /** Apaga todas las partículas (al entrar y salir de una repetición). */
+  api.clearFx = () => {
+    for (const P of [fire, smoke]) { for (const sp of P.list) { sp.visible = false; P.pool.push(sp); } P.list.length = 0; }
   };
 
   api.explosion = (p, size = 1) => {

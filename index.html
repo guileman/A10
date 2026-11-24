@@ -93009,17 +93009,41 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           root2.add(m);
           vehMeshes.set(v, m);
           m.userData.burnt = false;
+          m.userData.mats = m.userData.parts.map((p) => p.material);
+          if (m.userData.turret) {
+            m.userData.turretPos = m.userData.turret.position.clone();
+            m.userData.turretRot = m.userData.turret.rotation.clone();
+          }
         }
         m.position.set(v.pos[0], v.pos[1], v.pos[2]);
         m.rotation.set(0, v.heading, 0);
-        if ((v.state === "burning" || v.state === "destroyed") && !m.userData.burnt) {
+        const dead = v.state === "burning" || v.state === "destroyed";
+        if (dead && !m.userData.burnt) {
           m.userData.burnt = true;
           for (const p of m.userData.parts) p.material = BURNT;
           if (m.userData.turret) {
             m.userData.turret.rotation.set(0.25, 0.6, 0.1);
             m.userData.turret.position.y += 0.3;
           }
+        } else if (!dead && m.userData.burnt) {
+          m.userData.burnt = false;
+          m.userData.parts.forEach((p, i) => {
+            p.material = m.userData.mats[i];
+          });
+          if (m.userData.turret) {
+            m.userData.turret.position.copy(m.userData.turretPos);
+            m.userData.turret.rotation.copy(m.userData.turretRot);
+          }
         }
+      }
+    };
+    api.clearFx = () => {
+      for (const P of [fire, smoke]) {
+        for (const sp of P.list) {
+          sp.visible = false;
+          P.pool.push(sp);
+        }
+        P.list.length = 0;
       }
     };
     api.explosion = (p, size = 1) => {
@@ -93139,6 +93163,148 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     v.applyMatrix4(camera.projectionMatrix);
     out.x = v.x;
     out.y = v.y;
+    return out;
+  }
+
+  // src/game/replay.js
+  var clamp2 = (v, a, b) => v < a ? a : v > b ? b : v;
+  function acSnapshot(s, cg) {
+    const cs = s.controlSurfaces || {}, e = s.engine || {}, a = s.air || {}, gr = s.gear || {};
+    return {
+      pos: s.pos.slice(),
+      quat: s.quat.slice(),
+      vel: s.vel.slice(),
+      cgModel: (s.cgModel || cg || [0, 0, 0]).slice(),
+      controlSurfaces: { aileronLDeg: cs.aileronLDeg, aileronRDeg: cs.aileronRDeg, elevatorDeg: cs.elevatorDeg, rudderDeg: cs.rudderDeg, flapsDeg: cs.flapsDeg, speedbrakeDeg: cs.speedbrakeDeg },
+      gear: { extension: gr.extension, state: gr.state, units: [] },
+      engine: { rpmPct: e.rpmPct, thrustN: e.thrustN, stall: false },
+      air: { iasKt: a.iasKt, tempK: a.tempK, altAglM: a.altAglM, gs: a.gs },
+      flags: {},
+      warnings: [],
+      nozzles: {},
+      rcs: {}
+    };
+  }
+  function createRecorder({ seconds = 14 } = {}) {
+    const frames = [];
+    const rec = {
+      frames,
+      push(t, s, cg, weapons, convoy, fx) {
+        const R = weapons.rounds, rounds = new Float32Array(R.length * 6);
+        for (let i = 0; i < R.length; i++) {
+          const r = R[i], o = i * 6;
+          rounds[o] = r.pos[0];
+          rounds[o + 1] = r.pos[1];
+          rounds[o + 2] = r.pos[2];
+          rounds[o + 3] = r.vel[0];
+          rounds[o + 4] = r.vel[1];
+          rounds[o + 5] = r.vel[2];
+        }
+        const missiles = [];
+        for (const m of weapons.missiles) if (m.alive) missiles.push({ ref: m, pos: m.pos.slice(), dir: (m.dir || [1, 0, 0]).slice(), motor: !!m.motor });
+        const V = convoy.vehicles, veh = new Float32Array(V.length * 5), vstate = new Array(V.length);
+        for (let i = 0; i < V.length; i++) {
+          const v = V[i], o = i * 5;
+          veh[o] = v.pos[0];
+          veh[o + 1] = v.pos[1];
+          veh[o + 2] = v.pos[2];
+          veh[o + 3] = v.heading;
+          veh[o + 4] = v.burnT || 0;
+          vstate[i] = v.state;
+        }
+        let pyl = 0;
+        weapons.pylons.forEach((p, i) => {
+          if (p.loaded) pyl |= 1 << i;
+        });
+        frames.push({ t, ac: acSnapshot(s, cg), rounds, missiles, veh, vstate, pyl, firing: !!weapons.firing, spin: weapons.spin || 0, fx: fx && fx.length ? fx.map((e) => ({ type: e.type, pos: e.pos.slice(), size: e.size })) : null });
+        while (frames.length && frames[0].t < t - seconds) frames.shift();
+      },
+      clear() {
+        frames.length = 0;
+      },
+      get start() {
+        return frames.length ? frames[0].t : 0;
+      },
+      get end() {
+        return frames.length ? frames[frames.length - 1].t : 0;
+      },
+      /** Índice del último cuadro con t <= tt (búsqueda binaria). */
+      indexAt(tt) {
+        let lo = 0, hi = frames.length - 1;
+        if (hi < 0) return -1;
+        if (tt <= frames[0].t) return 0;
+        while (lo < hi) {
+          const mid = lo + hi + 1 >> 1;
+          if (frames[mid].t <= tt) lo = mid;
+          else hi = mid - 1;
+        }
+        return lo;
+      }
+    };
+    return rec;
+  }
+  function createMoments() {
+    const PRI = { kill: 3, explosion: 2, burst: 1 };
+    const list = [];
+    return {
+      list,
+      add(kind, t, pos) {
+        const last = list[list.length - 1];
+        if (last && Math.abs(t - last.t) < 2.5) {
+          if (PRI[kind] >= PRI[last.kind]) {
+            last.kind = kind;
+            last.t = t;
+            last.pos = pos.slice();
+          }
+          return last;
+        }
+        const m = { kind, t, pos: pos.slice() };
+        list.push(m);
+        if (list.length > 20) list.shift();
+        return m;
+      },
+      last() {
+        return list[list.length - 1] || null;
+      },
+      clear() {
+        list.length = 0;
+      }
+    };
+  }
+  function groundCameraPos(P, A, height, { back = 50, side = 26, eye = 1.8, bounds = null } = {}) {
+    let dx = A[0] - P[0], dz2 = A[2] - P[2];
+    const dl = Math.hypot(dx, dz2) || 1;
+    dx /= dl;
+    dz2 /= dl;
+    const px = -dz2, pz = dx;
+    let x = P[0] - dx * back + px * side, z = P[2] - dz2 * back + pz * side;
+    if (bounds) {
+      const m = 50;
+      x = clamp2(x, bounds.xMin + m, bounds.xMax - m);
+      z = clamp2(z, bounds.zMin + m, bounds.zMax - m);
+    }
+    return [x, height(x, z) + eye, z];
+  }
+  function frameShot(C, A, P, out = { dir: [0, 0, -1], fovDeg: 40 }) {
+    const da = [A[0] - C[0], A[1] - C[1], A[2] - C[2]], dp = [P[0] - C[0], P[1] + 1.5 - C[1], P[2] - C[2]];
+    const la = Math.hypot(...da) || 1, lp = Math.hypot(...dp) || 1;
+    for (let i = 0; i < 3; i++) {
+      da[i] /= la;
+      dp[i] /= lp;
+    }
+    const ang = Math.acos(clamp2(da[0] * dp[0] + da[1] * dp[1] + da[2] * dp[2], -1, 1)) * 180 / Math.PI;
+    let wa = 0.5, fov = ang * 1.35 + 7;
+    if (ang > 55) {
+      wa = 0.3;
+      fov = 75;
+    }
+    fov = Math.max(fov, 2 * Math.atan(12 / la) * 180 / Math.PI);
+    const d = [da[0] * wa + dp[0] * (1 - wa), da[1] * wa + dp[1] * (1 - wa), da[2] * wa + dp[2] * (1 - wa)];
+    const l = Math.hypot(...d) || 1;
+    out.dir[0] = d[0] / l;
+    out.dir[1] = d[1] / l;
+    out.dir[2] = d[2] / l;
+    out.fovDeg = clamp2(fov, 8, 75);
     return out;
   }
 
@@ -93357,6 +93523,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     { id: "missile", label: "Disparar Maverick", group: "Armas", kind: "press", emit: "fireMissile", keys: ["Enter"] },
     { id: "lock", label: "Fijar blanco (m\xE1s cercano al centro / ciclar)", group: "Armas", kind: "press", emit: "lockTarget", keys: ["KeyL"] },
     { id: "unlock", label: "Soltar blanco", group: "Armas", kind: "press", emit: "unlockTarget", keys: ["KeyU"] },
+    { id: "replay", label: "Repetici\xF3n del \xFAltimo impacto (c\xE1mara de suelo)", group: "Vista", kind: "press", keys: ["KeyX"] },
     { id: "gear", label: "Tren de aterrizaje", group: "Aeronave", kind: "press", keys: ["KeyG"] },
     { id: "flaps", label: "Flaps (ciclo UP / MVR / DN)", group: "Aeronave", kind: "press", keys: ["KeyF"] },
     { id: "brake", label: "Frenos de ruedas (mantener)", group: "Aeronave", kind: "hold", keys: ["KeyB"] },
@@ -93407,7 +93574,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       invertLookY: false
     };
   }
-  var clamp2 = (v, a, b) => v < a ? a : v > b ? b : v;
+  var clamp3 = (v, a, b) => v < a ? a : v > b ? b : v;
   var fin = (v, d) => typeof v === "number" && Number.isFinite(v) ? v : d;
   function codeLabel(code) {
     if (!code) return "\u2014";
@@ -93468,22 +93635,22 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const applySettings = (p, save = true) => {
       const s = settings, d = defaultInputSettings();
       if (p.ramp) {
-        s.ramp.rise = clamp2(fin(p.ramp.rise, s.ramp.rise), 0.3, 20);
-        s.ramp.fall = clamp2(fin(p.ramp.fall, s.ramp.fall), 0.3, 30);
-        s.ramp.yawRise = clamp2(fin(p.ramp.yawRise, s.ramp.yawRise), 0.3, 20);
+        s.ramp.rise = clamp3(fin(p.ramp.rise, s.ramp.rise), 0.3, 20);
+        s.ramp.fall = clamp3(fin(p.ramp.fall, s.ramp.fall), 0.3, 30);
+        s.ramp.yawRise = clamp3(fin(p.ramp.yawRise, s.ramp.yawRise), 0.3, 20);
       }
       if (p.expo) {
-        for (const k of ["pitch", "roll", "yaw"]) if (k in p.expo) s.expo[k] = clamp2(fin(p.expo[k], d.expo[k]), 0, 0.95);
+        for (const k of ["pitch", "roll", "yaw"]) if (k in p.expo) s.expo[k] = clamp3(fin(p.expo[k], d.expo[k]), 0, 0.95);
       }
-      if ("throttleRate" in p) s.throttleRate = clamp2(fin(p.throttleRate, d.throttleRate), 0.05, 5);
+      if ("throttleRate" in p) s.throttleRate = clamp3(fin(p.throttleRate, d.throttleRate), 0.05, 5);
       if ("mouseStick" in p) s.mouseStick = !!p.mouseStick;
-      if ("mouseSensitivity" in p) s.mouseSensitivity = clamp2(fin(p.mouseSensitivity, d.mouseSensitivity), 50, 3e3);
-      if ("mouseRecenterDelay" in p) s.mouseRecenterDelay = clamp2(fin(p.mouseRecenterDelay, d.mouseRecenterDelay), 0, 3);
-      if ("mouseRecenterRate" in p) s.mouseRecenterRate = clamp2(fin(p.mouseRecenterRate, d.mouseRecenterRate), 0, 20);
+      if ("mouseSensitivity" in p) s.mouseSensitivity = clamp3(fin(p.mouseSensitivity, d.mouseSensitivity), 50, 3e3);
+      if ("mouseRecenterDelay" in p) s.mouseRecenterDelay = clamp3(fin(p.mouseRecenterDelay, d.mouseRecenterDelay), 0, 3);
+      if ("mouseRecenterRate" in p) s.mouseRecenterRate = clamp3(fin(p.mouseRecenterRate, d.mouseRecenterRate), 0, 20);
       if ("invertMouseY" in p) s.invertMouseY = !!p.invertMouseY;
-      if ("mouseDeadzone" in p) s.mouseDeadzone = clamp2(fin(p.mouseDeadzone, d.mouseDeadzone), 0, 0.3);
-      if ("mouseExpo" in p) s.mouseExpo = clamp2(fin(p.mouseExpo, d.mouseExpo), 0, 0.95);
-      if ("lookSensitivity" in p) s.lookSensitivity = clamp2(fin(p.lookSensitivity, d.lookSensitivity), 5e-4, 0.02);
+      if ("mouseDeadzone" in p) s.mouseDeadzone = clamp3(fin(p.mouseDeadzone, d.mouseDeadzone), 0, 0.3);
+      if ("mouseExpo" in p) s.mouseExpo = clamp3(fin(p.mouseExpo, d.mouseExpo), 0, 0.95);
+      if ("lookSensitivity" in p) s.lookSensitivity = clamp3(fin(p.lookSensitivity, d.lookSensitivity), 5e-4, 0.02);
       if ("invertLookY" in p) s.invertLookY = !!p.invertLookY;
       if (save) persist();
     };
@@ -93632,8 +93799,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       }
       if (settings.mouseStick) {
         const k = 1 / settings.mouseSensitivity;
-        st.mx = clamp2(st.mx + mx * k, -1, 1);
-        st.my = clamp2(st.my + (settings.invertMouseY ? -1 : 1) * my * k, -1, 1);
+        st.mx = clamp3(st.mx + mx * k, -1, 1);
+        st.my = clamp3(st.my + (settings.invertMouseY ? -1 : 1) * my * k, -1, 1);
         st.lastMouseMove = now();
       }
     };
@@ -93720,7 +93887,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return v > s ? v - s : v < -s ? v + s : 0;
       }
       const r = (Math.sign(v) === -t ? rise + fall : rise) * dt;
-      return clamp2(v + t * r, -1, 1);
+      return clamp3(v + t * r, -1, 1);
     };
     const expo2 = (v, e) => (1 - e) * v + e * v * v * v;
     const stepToward = (v, t, r) => v < t ? Math.min(t, v + r) : Math.max(t, v - r);
@@ -93742,7 +93909,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         st.pitch = ramp(st.pitch, axisTarget("pitchDown", "pitchUp"), dt, settings.ramp.rise);
         st.roll = ramp(st.roll, axisTarget("rollLeft", "rollRight"), dt, settings.ramp.rise);
         st.yaw = ramp(st.yaw, axisTarget("yawLeft", "yawRight"), dt, settings.ramp.yawRise);
-        st.throttle = clamp2(st.throttle + axisTarget("throttleDown", "throttleUp") * settings.throttleRate * dt, 0, 1);
+        st.throttle = clamp3(st.throttle + axisTarget("throttleDown", "throttleUp") * settings.throttleRate * dt, 0, 1);
         st.brake = stepToward(st.brake, held.brake > 0 ? 1 : 0, (held.brake > 0 ? 4 : 6) * dt);
         if (settings.mouseStick && (st.mx !== 0 || st.my !== 0)) {
           if (now() - st.lastMouseMove > settings.mouseRecenterDelay) {
@@ -93768,13 +93935,13 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return a <= z ? 0 : Math.sign(v) * expo2((a - z) / (1 - z), settings.mouseExpo);
         };
         const mp = mdz(st.my), mr = mdz(st.mx);
-        c.pitch = clamp2(expo2(st.pitch, ex.pitch) + mp + st.xp, -1, 1);
-        c.roll = clamp2(expo2(st.roll, ex.roll) + mr + st.xr, -1, 1);
+        c.pitch = clamp3(expo2(st.pitch, ex.pitch) + mp + st.xp, -1, 1);
+        c.roll = clamp3(expo2(st.roll, ex.roll) + mr + st.xr, -1, 1);
         c.mouseStick = settings.mouseStick;
         c.mouseLocked = locked;
         c.stickX = st.mx;
         c.stickY = st.my;
-        c.yaw = clamp2(expo2(st.yaw, ex.yaw) + st.xy, -1, 1);
+        c.yaw = clamp3(expo2(st.yaw, ex.yaw) + st.xy, -1, 1);
         c.throttle = st.throttle;
         c.flaps = st.flaps;
         c.gearDown = st.gearDown;
@@ -93809,23 +93976,23 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         st.pitch = st.roll = st.yaw = 0;
         st.mx = st.my = 0;
         st.brake = 0;
-        st.throttle = clamp2(fin(p.throttle, 0.7), 0, 1);
+        st.throttle = clamp3(fin(p.throttle, 0.7), 0, 1);
         st.flaps = [0, 1, 2].includes(p.flaps) ? p.flaps : 0;
         st.gearDown = p.gearDown !== void 0 ? !!p.gearDown : false;
         st.parkingBrake = false;
         st.speedbrake = false;
         st.mouseGun = false;
-        st.stab = p.assist ? clamp2(fin(p.assist.stabilityAug, 1), 0, 1) : 1;
+        st.stab = p.assist ? clamp3(fin(p.assist.stabilityAug, 1), 0, 1) : 1;
       },
       setAssist(a) {
-        if (a) st.stab = clamp2(fin(a.stabilityAug, st.stab), 0, 1);
+        if (a) st.stab = clamp3(fin(a.stabilityAug, st.stab), 0, 1);
       },
       /** Entrada externa (mandos de VR): palanca en [-1,1] y freno en [0,1]; se suma a la del teclado. */
       setExternal({ pitch = 0, roll = 0, yaw = 0, brake = 0 } = {}) {
-        st.xp = clamp2(fin(pitch, 0), -1, 1);
-        st.xr = clamp2(fin(roll, 0), -1, 1);
-        st.xy = clamp2(fin(yaw, 0), -1, 1);
-        st.xb = clamp2(fin(brake, 0), 0, 1);
+        st.xp = clamp3(fin(pitch, 0), -1, 1);
+        st.xr = clamp3(fin(roll, 0), -1, 1);
+        st.xy = clamp3(fin(yaw, 0), -1, 1);
+        st.xb = clamp3(fin(brake, 0), 0, 1);
       },
       /** Dispara una acción de tipo 'press' (tren, flaps, missile…) como si fuera la tecla. 'airbrake' es alias de 'speedbrake'. */
       press(id) {
@@ -93837,7 +94004,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       },
       // nozzleCmd: solo para src/xr/mapping.js (heredado; siempre 0)
       setThrottle(v) {
-        st.throttle = clamp2(fin(v, 0), 0, 1);
+        st.throttle = clamp3(fin(v, 0), 0, 1);
       },
       setNozzleDeg() {
       },
@@ -93924,7 +94091,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   var CAMERA_MODES = ["pilot", "chase", "world", "weapon"];
   var D2R4 = Math.PI / 180;
   var R2D = 180 / Math.PI;
-  var clamp3 = (v, a, b) => v < a ? a : v > b ? b : v;
+  var clamp4 = (v, a, b) => v < a ? a : v > b ? b : v;
   var fin2 = (v, d = 0) => typeof v === "number" && Number.isFinite(v) ? v : d;
   function defaultCameraOptions() {
     return {
@@ -94042,8 +94209,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     };
     const updateLook = (dt, look, p) => {
       if (look && look.active) {
-        r.lookYaw = clamp3(r.lookYaw + fin2(look.dyaw ?? look.yaw), -p.yawLimit, p.yawLimit);
-        r.lookPitch = clamp3(r.lookPitch + fin2(look.dpitch ?? look.pitch), p.pitchMin, p.pitchMax);
+        r.lookYaw = clamp4(r.lookYaw + fin2(look.dyaw ?? look.yaw), -p.yawLimit, p.yawLimit);
+        r.lookPitch = clamp4(r.lookPitch + fin2(look.dpitch ?? look.pitch), p.pitchMin, p.pitchMax);
         r.sinceLook = 0;
       } else {
         r.sinceLook += dt;
@@ -94058,7 +94225,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     };
     const updatePilot = (dt, state, look) => {
       updateLook(dt, look, o.pilot);
-      if (look && look.zoom) r.zoomK = clamp3(r.zoomK * Math.exp(-0.1 * look.zoom), 0.5, 3);
+      if (look && look.zoom) r.zoomK = clamp4(r.zoomK * Math.exp(-0.1 * look.zoom), 0.5, 3);
       const g = aircraft_ && aircraft_.group;
       const eyeL = aircraft_ && aircraft_.eyeLocal;
       if (g && g.matrixWorld && eyeL) _eye.copy(eyeL).applyMatrix4(g.matrixWorld);
@@ -94070,7 +94237,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       _qa.setFromAxisAngle(_AX_Y, -r.lookYaw);
       _qb.setFromAxisAngle(_AX_Z, r.lookPitch);
       camera.quaternion.copy(_q2).multiply(_qa).multiply(_qb).multiply(Q_CAM2BODY);
-      setFov(clamp3(r.baseFov / r.zoomK, o.pilot.fovMin * 0.5, o.pilot.fovMax));
+      setFov(clamp4(r.baseFov / r.zoomK, o.pilot.fovMin * 0.5, o.pilot.fovMax));
     };
     const spring = (x, v, d, f, zeta, dt) => {
       const w = 2 * Math.PI * f;
@@ -94095,7 +94262,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       }
       const a = r.lookYaw, ca = Math.cos(a), sa = Math.sin(a);
       const bx = r.backX * ca + r.backZ * sa, bz = -r.backX * sa + r.backZ * ca;
-      const el = clamp3(c.elevDeg * D2R4 - r.lookPitch, -10 * D2R4, 85 * D2R4);
+      const el = clamp4(c.elevDeg * D2R4 - r.lookPitch, -10 * D2R4, 85 * D2R4);
       const d = r.chaseDist, ce = Math.cos(el), se = Math.sin(el);
       r.cDes.set(_pos.x + bx * d * ce, _pos.y + d * se, _pos.z + bz * d * ce);
       const floor = ground(r.cDes.x, r.cDes.z) + c.clearance;
@@ -94105,7 +94272,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const updateChase = (dt, state, look) => {
       const c = o.chase;
       updateLook(dt, look, { yawLimit: Math.PI, pitchMin: -60 * D2R4, pitchMax: 70 * D2R4, returnDelay: 1.2, returnRate: 2.5 });
-      if (look && look.zoom) r.chaseDist = clamp3(r.chaseDist * Math.exp(0.1 * look.zoom), c.distMin, c.distMax);
+      if (look && look.zoom) r.chaseDist = clamp4(r.chaseDist * Math.exp(0.1 * look.zoom), c.distMin, c.distMax);
       chaseDesired();
       if (!r.chaseInit) {
         r.cPos.copy(r.cDes);
@@ -94153,8 +94320,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       const rx = -dz2, rz = dx;
       let ahead, side;
       if (speed >= w.slowSpeed) {
-        ahead = clamp3(speed * w.aheadTime, w.aheadMin, w.aheadMax);
-        side = clamp3(speed * 0.6, 40, 150) * r.wSide;
+        ahead = clamp4(speed * w.aheadTime, w.aheadMin, w.aheadMax);
+        side = clamp4(speed * 0.6, 40, 150) * r.wSide;
       } else {
         ahead = w.nearOffset;
         side = w.nearSide * r.wSide;
@@ -94163,14 +94330,14 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       r.wPos.x = _pos.x + dx * ahead + rx * side;
       r.wPos.z = _pos.z + dz2 * ahead + rz * side;
       const gC = ground(r.wPos.x, r.wPos.z);
-      const hgt = speed >= w.slowSpeed ? clamp3(agl * w.heightFrac, w.heightMin, w.heightMax) : w.heightMin;
+      const hgt = speed >= w.slowSpeed ? clamp4(agl * w.heightFrac, w.heightMin, w.heightMax) : w.heightMin;
       r.wPos.y = Math.max(gC + hgt, gC + o.terrainClearance);
       r.lastReloc = r.time;
       r.wInit = true;
     };
     const updateWorld = (dt, state, look) => {
       const w = o.world;
-      if (look && look.zoom) r.zoomK = clamp3(r.zoomK * Math.exp(0.1 * look.zoom), 0.3, 4);
+      if (look && look.zoom) r.zoomK = clamp4(r.zoomK * Math.exp(0.1 * look.zoom), 0.3, 4);
       const speed = Math.hypot(_vel.x, _vel.z);
       if (!r.wInit || r.wForce) {
         placeWorld(state);
@@ -94181,7 +94348,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         const dist2 = _tmp2.length();
         const jumped = _tmp2.copy(_pos).sub(r.lastP).length() > w.teleport && dt < 0.5;
         const radial = dist2 > 1e-3 ? _vel.dot(_tmp2.copy(_pos).sub(r.wPos)) / dist2 : 0;
-        const far = speed >= w.slowSpeed ? clamp3(speed * w.farTime, w.farMin, w.farMax) : w.farSlow;
+        const far = speed >= w.slowSpeed ? clamp4(speed * w.farTime, w.farMin, w.farMax) : w.farSlow;
         const can = r.time - r.lastReloc > w.minInterval;
         if (jumped || dist2 > w.hardFar || can && dist2 > far && radial > 0) {
           placeWorld(state);
@@ -94198,7 +94365,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       r.wAim.z += (_pos.z - r.wAim.z) * k;
       if (_tmp2.copy(r.wAim).sub(r.wPos).lengthSq() > 1e-4) camera.lookAt(r.wAim);
       const dist = _tmp2.copy(_pos).sub(r.wPos).length();
-      const target = clamp3(2 * Math.atan2(w.viewRadius * r.zoomK, Math.max(dist, 1)) * R2D, w.fovMin, w.fovMax);
+      const target = clamp4(2 * Math.atan2(w.viewRadius * r.zoomK, Math.max(dist, 1)) * R2D, w.fovMin, w.fovMax);
       const kf = 1 - Math.exp(-w.fovRate * Math.min(dt, 0.1));
       r.wFov += (target - r.wFov) * kf;
       setFov(r.wFov);
@@ -94209,7 +94376,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         api.setMode(r.prevMode === "weapon" ? "chase" : r.prevMode);
         return;
       }
-      if (look && look.zoom) r.weaponDist = clamp3(r.weaponDist * Math.exp(0.1 * look.zoom), w.distMin, w.distMax);
+      if (look && look.zoom) r.weaponDist = clamp4(r.weaponDist * Math.exp(0.1 * look.zoom), w.distMin, w.distMax);
       if (tg.updateWorldMatrix) tg.updateWorldMatrix(true, false);
       if (tg.matrixWorld) tg.matrixWorld.decompose(_wp, _wq, _ws);
       else _wp.copy(tg.position || _wp);
@@ -94500,7 +94667,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   var M_TO_FT = 1 / 0.3048;
   var MS_TO_FPM = 60 / 0.3048;
   var finite = (v, d = 0) => typeof v === "number" && Number.isFinite(v) ? v : d;
-  var clamp4 = (v, a, b) => v < a ? a : v > b ? b : v;
+  var clamp5 = (v, a, b) => v < a ? a : v > b ? b : v;
 
   // src/ui/hud.js
   var FONT = 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
@@ -94577,7 +94744,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       const d = dpr || (typeof devicePixelRatio !== "undefined" ? devicePixelRatio : 1) || 1;
       S.W = Math.max(320, cw);
       S.H = Math.max(240, ch);
-      S.dpr = clamp4(d, 1, 3);
+      S.dpr = clamp5(d, 1, 3);
       canvas.width = Math.round(S.W * S.dpr);
       canvas.height = Math.round(S.H * S.dpr);
     };
@@ -94619,7 +94786,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       ctx.stroke();
     };
     const bar = (x, y, w, h, frac, color) => {
-      frac = clamp4(frac, 0, 1);
+      frac = clamp5(frac, 0, 1);
       ctx.fillStyle = P("rgba(0,12,6,0.6)");
       ctx.fillRect(x, y, w, h);
       ctx.fillStyle = color;
@@ -94643,49 +94810,49 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const X = { has: false, ammo: 0, firing: false, spin: 0, missiles: 0, locked: false, lockP: 0, ccip: null, targets: [], nT: 0, range: null, msg: "", weapon: "gun" };
     const n1of = (s) => {
       const a = s && s.n1Pct;
-      if (Array.isArray(a)) return [clamp4(num(a[0]), 0, 130), clamp4(num(a[1], num(a[0])), 0, 130)];
-      const r = clamp4(num(s && s.engine && s.engine.rpmPct), 0, 130);
+      if (Array.isArray(a)) return [clamp5(num(a[0]), 0, 130), clamp5(num(a[1], num(a[0])), 0, 130)];
+      const r = clamp5(num(s && s.engine && s.engine.rpmPct), 0, 130);
       return [r, r];
     };
     const extract = (s, c) => {
       const air = s.air || {}, eng = s.engine || {}, att = s.att || {}, gear = s.gear || {}, flags = s.flags || {}, cs = s.controlSurfaces || {};
-      D.pitch = clamp4(num(att.pitchDeg), -90, 90);
+      D.pitch = clamp5(num(att.pitchDeg), -90, 90);
       D.roll = num(att.rollDeg) % 360;
       D.hdg = (num(att.headingDeg) % 360 + 360) % 360;
-      D.ias = clamp4(num(air.iasKt), 0, 3e3);
-      D.mach = clamp4(num(air.machNo), 0, 20);
-      D.aoa = clamp4(num(air.aoaDeg), -180, 180);
-      D.beta = clamp4(num(air.betaDeg), -180, 180);
-      D.nz = clamp4(num(air.nz, 1), -50, 50);
-      D.gs = clamp4(num(air.gs) * MS_TO_KT, -3e3, 3e3);
-      D.alt = clamp4(num(air.altMslM) * M_TO_FT, -2e3, 3e5);
+      D.ias = clamp5(num(air.iasKt), 0, 3e3);
+      D.mach = clamp5(num(air.machNo), 0, 20);
+      D.aoa = clamp5(num(air.aoaDeg), -180, 180);
+      D.beta = clamp5(num(air.betaDeg), -180, 180);
+      D.nz = clamp5(num(air.nz, 1), -50, 50);
+      D.gs = clamp5(num(air.gs) * MS_TO_KT, -3e3, 3e3);
+      D.alt = clamp5(num(air.altMslM) * M_TO_FT, -2e3, 3e5);
       D.hasAgl = typeof air.altAglM === "number" && Number.isFinite(air.altAglM);
-      D.agl = clamp4(num(air.altAglM) * M_TO_FT, -2e3, 1e7);
-      D.vs = clamp4(num(air.vsMs) * MS_TO_FPM, -1e5, 1e5);
+      D.agl = clamp5(num(air.altAglM) * M_TO_FT, -2e3, 1e7);
+      D.vs = clamp5(num(air.vsMs) * MS_TO_FPM, -1e5, 1e5);
       D.n1 = n1of(s);
-      D.fuel = clamp4(num(eng.fuelKg), 0, 1e6);
-      D.flow = clamp4(num(eng.fuelFlowKgS) * 60, -1e4, 1e4);
+      D.fuel = clamp5(num(eng.fuelKg), 0, 1e6);
+      D.flow = clamp5(num(eng.fuelFlowKgS) * 60, -1e4, 1e4);
       D.engStall = !!eng.stall;
       D.gearState = gear.state === "down" || gear.state === "transit" || gear.state === "up" ? gear.state : "up";
       D.flapsIdx = c && [0, 1, 2].includes(c.flaps) ? c.flaps : 0;
-      D.flapsDeg = clamp4(num(cs.flapsDeg), -360, 360);
-      const sbDeg = clamp4(num(cs.speedbrakeDeg, num(cs.airbrakeDeg)), -360, 360);
+      D.flapsDeg = clamp5(num(cs.flapsDeg), -360, 360);
+      const sbDeg = clamp5(num(cs.speedbrakeDeg, num(cs.airbrakeDeg)), -360, 360);
       D.speedbrake = !!(c && (c.speedbrake > 0.5 || c.airbrake === true)) || sbDeg > 1;
-      D.brake = clamp4(num(c && c.brake), 0, 1);
+      D.brake = clamp5(num(c && c.brake), 0, 1);
       D.parking = !!(c && c.parkingBrake);
       D.flags = flags;
       D.warn = Array.isArray(s.warnings) ? s.warnings : [];
       D.stall = !!(s.stall || flags.stalled || D.warn.includes("STALL"));
       const bf = s.buffet;
-      D.buffet = bf === true ? 1 : clamp4(num(bf), 0, 1);
+      D.buffet = bf === true ? 1 : clamp5(num(bf), 0, 1);
       D.vel = Array.isArray(s.vel) ? s.vel : null;
       D.quat = Array.isArray(s.quat) ? s.quat : null;
       D.mouseStick = !!(c && c.mouseStick);
       D.mouseLocked = !!(c && c.mouseLocked);
-      D.stickX = clamp4(num(c && c.stickX), -1, 1);
-      D.stickY = clamp4(num(c && c.stickY), -1, 1);
-      D.cPitch = clamp4(num(c && c.pitch), -1, 1);
-      D.cRoll = clamp4(num(c && c.roll), -1, 1);
+      D.stickX = clamp5(num(c && c.stickX), -1, 1);
+      D.stickY = clamp5(num(c && c.stickY), -1, 1);
+      D.cPitch = clamp5(num(c && c.pitch), -1, 1);
+      D.cRoll = clamp5(num(c && c.roll), -1, 1);
       if (D.fuel > S.fuelCap) S.fuelCap = D.fuel;
     };
     const extractExtra = (e) => {
@@ -94696,15 +94863,15 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       X.msg = "";
       if (!X.has) return;
       const g = e.gun || {}, m = e.missiles || {};
-      X.ammo = clamp4(num(g.ammo), 0, 1e5);
+      X.ammo = clamp5(num(g.ammo), 0, 1e5);
       X.firing = !!g.firing;
-      X.spin = clamp4(num(g.spin), 0, 1);
-      X.missiles = clamp4(Math.round(num(m.left)), 0, 99);
+      X.spin = clamp5(num(g.spin), 0, 1);
+      X.missiles = clamp5(Math.round(num(m.left)), 0, 99);
       X.locked = !!m.locked;
-      X.lockP = clamp4(num(m.lockProgress), 0, 1);
+      X.lockP = clamp5(num(m.lockProgress), 0, 1);
       X.weapon = e.weapon === "agm65" || e.weapon === "gun" ? e.weapon : X.locked || X.lockP > 0 ? "agm65" : "gun";
       const c = e.ccip;
-      if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) X.ccip = { x: clamp4(c.x, -3, 3), y: clamp4(c.y, -3, 3) };
+      if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) X.ccip = { x: clamp5(c.x, -3, 3), y: clamp5(c.y, -3, 3) };
       if (typeof e.range === "number" && Number.isFinite(e.range) && e.range >= 0) X.range = e.range;
       if (typeof e.message === "string") X.msg = e.message.slice(0, 80);
       const ts = Array.isArray(e.targets) ? e.targets : [];
@@ -94713,8 +94880,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         if (!t || t.alive === false || !Number.isFinite(t.x) || !Number.isFinite(t.y)) continue;
         let o = X.targets[X.nT];
         if (!o) o = X.targets[X.nT] = {};
-        o.x = clamp4(t.x, -3, 3);
-        o.y = clamp4(t.y, -3, 3);
+        o.x = clamp5(t.x, -3, 3);
+        o.y = clamp5(t.y, -3, 3);
         o.dist = Number.isFinite(t.dist) && t.dist >= 0 ? t.dist : null;
         o.locked = !!t.locked;
         o.type = typeof t.type === "string" ? t.type.slice(0, 12) : "";
@@ -94722,7 +94889,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       }
     };
     const drawPitchLadder = (cx, cy, u) => {
-      const ppd = S.H / clamp4(opt.vfovDeg, 20, 120);
+      const ppd = S.H / clamp5(opt.vfovDeg, 20, 120);
       ctx.save();
       ctx.beginPath();
       ctx.rect(cx - 330 * u, cy - 190 * u, 660 * u, 360 * u);
@@ -94794,9 +94961,9 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       const ux = 2 * (cqy * vz - cqz * vy), uy = 2 * (cqz * vx - cqx * vz), uz = 2 * (cqx * vy - cqy * vx);
       const rx = vx + qw * ux + (cqy * uz - cqz * uy), ry = vy + qw * uy + (cqz * ux - cqx * uz), rz = vz + qw * uz + (cqx * uy - cqy * ux);
       if (rx < 0.2 * sp) return;
-      const ppd = S.H / clamp4(opt.vfovDeg, 20, 120);
+      const ppd = S.H / clamp5(opt.vfovDeg, 20, 120);
       const dxDeg = Math.atan2(rz, rx) / D2R5, dyDeg = Math.atan2(ry, rx) / D2R5;
-      const x = cx + clamp4(dxDeg * ppd, -150 * u, 150 * u), y = cy - clamp4(dyDeg * ppd, -150 * u, 150 * u);
+      const x = cx + clamp5(dxDeg * ppd, -150 * u, 150 * u), y = cy - clamp5(dyDeg * ppd, -150 * u, 150 * u);
       ctx.lineWidth = 2 * u;
       line2(() => {
         ctx.beginPath();
@@ -94874,7 +95041,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         line2(seg(xv, y, xv + (m ? 11 : 6) * u, y), col, 1.4 * u);
         if (m) text(String(Math.abs(v / 1e3)), xv + 22 * u, y, 11 * u, col, "left");
       }
-      const vy = cy - clamp4(D.vs, -2e3, 2e3) / 2e3 * (hv / 2);
+      const vy = cy - clamp5(D.vs, -2e3, 2e3) / 2e3 * (hv / 2);
       ctx.beginPath();
       ctx.moveTo(xv, vy);
       ctx.lineTo(xv - 12 * u, vy - 6 * u);
@@ -94984,7 +95151,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       dot2(x, y, 2.6 * u, col, OUT);
       const rg = X.range !== null ? X.range : targetDist();
       if (rg !== null) {
-        const f = clamp4(rg / (opt.inRangeM * 1.25), 0, 1), a0 = -Math.PI / 2;
+        const f = clamp5(rg / (opt.inRangeM * 1.25), 0, 1), a0 = -Math.PI / 2;
         line2(() => {
           ctx.beginPath();
           ctx.arc(x, y, R + 7 * u, a0, a0 + f * Math.PI * 2);
@@ -95044,7 +95211,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       ctx.stroke();
       line2(seg(cx - 6 * u, y - 6 * u, cx - 6 * u, y + 6 * u), col, 1 * u);
       line2(seg(cx + 6 * u, y - 6 * u, cx + 6 * u, y + 6 * u), col, 1 * u);
-      dot2(cx + clamp4(D.beta / 10, -1, 1) * (w / 2 - 6 * u), y, 4.5 * u, col, OUT);
+      dot2(cx + clamp5(D.beta / 10, -1, 1) * (w / 2 - 6 * u), y, 4.5 * u, col, OUT);
     };
     const drawWarnings = (cx, y, u) => {
       const list = [];
@@ -95121,7 +95288,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       text("COMB " + f0(D.fuel), gx - 4 * u, y0 + 51 * u, 10 * u, col, "left");
       drawWarnings(W / 2, 54 * u, u);
       if (X.has) drawAttack(W / 2, H / 2, u);
-      drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 20 * u, u);
+      drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 60 * u, u);
     };
     const drawFull = (u) => {
       const W = S.W, H = S.H, cx = W / 2, cy = H * 0.5;
@@ -95185,7 +95352,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         ctx.setTransform(S.dpr, 0, 0, S.dpr, 0, 0);
         ctx.clearRect(0, 0, S.W, S.H);
         if (!S.visible || !state) return;
-        const u = clamp4(Math.min(S.W / 1280, S.H / 720), 0.6, 2.4) * clamp4(opt.scale, 0.5, 2);
+        const u = clamp5(Math.min(S.W / 1280, S.H / 720), 0.6, 2.4) * clamp5(opt.scale, 0.5, 2);
         ctx.save();
         try {
           extract(state, controls);
@@ -95399,7 +95566,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   }
   var pick = (v, list, d) => list.includes(v) ? v : d;
   var pt = (p, d) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon) && Math.abs(p.lat) <= 85 && Math.abs(p.lon) <= 180 ? { lat: +p.lat, lon: +p.lon } : { ...d };
-  var rng = (v, key, d) => clamp4(finite(v, d), LIMITS[key][0], LIMITS[key][1]);
+  var rng = (v, key, d) => clamp5(finite(v, d), LIMITS[key][0], LIMITS[key][1]);
   function sanitize(raw) {
     const d = defaultSettings();
     const s = raw && typeof raw === "object" ? raw : {};
@@ -95407,7 +95574,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const e = s.environment || {}, a = s.assist || {}, h = s.hud || {}, m = s.map || {}, ms = s.mission || {};
     const route = { a: pt(r.a, d.route.a), b: pt(r.b, d.route.b) };
     const hasLen = computeRoute(route.a, route.b);
-    if (!hasLen.valid) route.b = destination(route.a, hasLen.bearingTrue || 270, clamp4(hasLen.lengthM, MIN_ROUTE_LENGTH_M, MAX_ROUTE_LENGTH_M));
+    if (!hasLen.valid) route.b = destination(route.a, hasLen.bearingTrue || 270, clamp5(hasLen.lengthM, MIN_ROUTE_LENGTH_M, MAX_ROUTE_LENGTH_M));
     return {
       source: pick(s.source, SOURCES, d.source),
       route,
@@ -95423,19 +95590,19 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       timeOfDay: pick(s.timeOfDay, TIMES, d.timeOfDay),
       quality: pick(s.quality, QUALITIES, d.quality),
       environment: {
-        windKt: clamp4(finite(e.windKt, d.environment.windKt), 0, 50),
+        windKt: clamp5(finite(e.windKt, d.environment.windKt), 0, 50),
         windFromDeg: (finite(e.windFromDeg, d.environment.windFromDeg) % 360 + 360) % 360,
-        tempOffsetC: clamp4(finite(e.tempOffsetC, 0), -30, 40),
-        qnhHpa: clamp4(finite(e.qnhHpa, 1013), 950, 1060),
-        turbulence: clamp4(finite(e.turbulence, d.environment.turbulence), 0, 1),
-        surfaceWetness: clamp4(finite(e.surfaceWetness, 0), 0, 1)
+        tempOffsetC: clamp5(finite(e.tempOffsetC, 0), -30, 40),
+        qnhHpa: clamp5(finite(e.qnhHpa, 1013), 950, 1060),
+        turbulence: clamp5(finite(e.turbulence, d.environment.turbulence), 0, 1),
+        surfaceWetness: clamp5(finite(e.surfaceWetness, 0), 0, 1)
       },
       fuelKg: rng(s.fuelKg, "fuelKg", d.fuelKg),
-      assist: { stabilityAug: clamp4(finite(a.stabilityAug, d.assist.stabilityAug), 0, 1) },
+      assist: { stabilityAug: clamp5(finite(a.stabilityAug, d.assist.stabilityAug), 0, 1) },
       camera: pick(s.camera, CAMERAS, d.camera),
-      hud: { scale: clamp4(finite(h.scale, 1), 0.7, 1.6), color: pick(h.color, ["verde", "ambar"], "verde") },
-      audio: { volume: clamp4(finite((s.audio || {}).volume, 0.7), 0, 1), muted: !!(s.audio || {}).muted },
-      map: { lon: finite(m.lon, d.map.lon), lat: finite(m.lat, d.map.lat), zoom: clamp4(finite(m.zoom, d.map.zoom), 1, 20) }
+      hud: { scale: clamp5(finite(h.scale, 1), 0.7, 1.6), color: pick(h.color, ["verde", "ambar"], "verde") },
+      audio: { volume: clamp5(finite((s.audio || {}).volume, 0.7), 0, 1), muted: !!(s.audio || {}).muted },
+      map: { lon: finite(m.lon, d.map.lon), lat: finite(m.lat, d.map.lat), zoom: clamp5(finite(m.zoom, d.map.zoom), 1, 20) }
     };
   }
   function loadSettings(storage) {
@@ -96246,7 +96413,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
 
   // src/audio/index.js
   var SOUND_C = 340;
-  var clamp5 = (v, a, b) => v < a ? a : v > b ? b : v;
+  var clamp6 = (v, a, b) => v < a ? a : v > b ? b : v;
   var lerp = (a, b, t) => a + (b - a) * t;
   var sm = (cur, target, dt, tau) => cur + (target - cur) * (1 - Math.exp(-dt / tau));
   function createAudio({ AudioContextClass } = {}) {
@@ -96548,7 +96715,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       g.gain.setTargetAtTime(v * v * 1, ctx.currentTime, 0.05);
     }
     api.setVolume = (v) => {
-      api.volume = clamp5(+v || 0, 0, 1);
+      api.volume = clamp6(+v || 0, 0, 1);
       applyMaster();
     };
     api.setMuted = (m) => {
@@ -96575,10 +96742,10 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     };
     api.update = (state, controls, dt, view2 = {}) => {
       if (!ctx || !running || !state) return;
-      dt = clamp5(dt || 0.016, 1e-3, 0.2);
+      dt = clamp6(dt || 0.016, 1e-3, 0.2);
       const t = ctx.currentTime, e = state.engine || {}, nz = state.nozzles || {}, air = state.air || {}, fl = state.flags || {};
-      const rpm = clamp5((e.rpmPct || 0) / 100, 0, 1.1);
-      const thrustRef = 9e4, thr = clamp5((e.thrustN || 0) / thrustRef, 0, 1.2);
+      const rpm = clamp6((e.rpmPct || 0) / 100, 0, 1.1);
+      const thrustRef = 9e4, thr = clamp6((e.thrustN || 0) / thrustRef, 0, 1.2);
       smooth.rpm = sm(smooth.rpm, rpm, dt, 0.35);
       smooth.thr = sm(smooth.thr, thr, dt, 0.25);
       let dist = 0, dop = 1;
@@ -96587,7 +96754,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         const dx = view2.camPos[0] - state.pos[0], dy = view2.camPos[1] - state.pos[1], dz2 = view2.camPos[2] - state.pos[2];
         dist = Math.hypot(dx, dy, dz2) || 1;
         const vr = (state.vel[0] * dx + state.vel[1] * dy + state.vel[2] * dz2) / dist;
-        dop = clamp5(SOUND_C / (SOUND_C - clamp5(vr, -240, 240)), 0.7, 1.6);
+        dop = clamp6(SOUND_C / (SOUND_C - clamp6(vr, -240, 240)), 0.7, 1.6);
       }
       smooth.dop = sm(smooth.dop, dop, dt, 0.12);
       smooth.dist = sm(smooth.dist, dist, dt, 0.2);
@@ -96598,7 +96765,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         cabinHz = 2600;
       } else if (mode === "world") {
         bus = 1 / (1 + smooth.dist / 120);
-        cabinHz = clamp5(16e3 / (1 + smooth.dist / 500), 1200, 16e3);
+        cabinHz = clamp6(16e3 / (1 + smooth.dist / 500), 1200, 16e3);
       }
       N.bus.gain.setTargetAtTime(bus, t, 0.08);
       N.cabin.frequency.setTargetAtTime(cabinHz, t, 0.1);
@@ -96618,19 +96785,19 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       N.whine.frequency.setTargetAtTime(whHz, t, 0.08);
       N.whine2.frequency.setTargetAtTime(whHz * 1.51, t, 0.08);
       N.whineG.gain.setTargetAtTime((smooth.rpm > 0.05 ? 0.05 + smooth.rpm * 0.09 : 0) * (mode === "pilot" ? 0.45 : 1), t, 0.1);
-      const noz = clamp5((nz.angleDeg || 0) / 90, 0, 1.1), agl = air.altAglM ?? 100;
-      const ground = clamp5(1 - agl / 60, 0, 1) * (fl.inGroundEffect ? 1.25 : 1);
+      const noz = clamp6((nz.angleDeg || 0) / 90, 0, 1.1), agl = air.altAglM ?? 100;
+      const ground = clamp6(1 - agl / 60, 0, 1) * (fl.inGroundEffect ? 1.25 : 1);
       const downTarget = smooth.thr * noz * (0.35 + 0.65 * ground);
       smooth.down = sm(smooth.down, downTarget, dt, 0.3);
       N.downG.gain.setTargetAtTime(smooth.down * 0.9, t, 0.05);
       N.downLP.frequency.setTargetAtTime(160 + smooth.down * 260, t, 0.1);
-      const ias = air.iasKt || 0, wind = clamp5(ias / 400, 0, 1.3);
+      const ias = air.iasKt || 0, wind = clamp6(ias / 400, 0, 1.3);
       smooth.wind = sm(smooth.wind, wind * wind, dt, 0.4);
       N.windG.gain.setTargetAtTime(smooth.wind * 0.6 * (mode === "pilot" ? 0.7 : 1), t, 0.1);
       N.windBP.frequency.setTargetAtTime(350 + wind * 1800, t, 0.1);
       const units = state.gear && state.gear.units ? state.gear.units : [];
       const gs = air.gs || 0, onG = !!(fl.onGround || fl.weightOnWheels);
-      const roll = onG ? clamp5(gs / 80, 0, 1) : 0;
+      const roll = onG ? clamp6(gs / 80, 0, 1) : 0;
       smooth.roll = sm(smooth.roll, roll, dt, 0.15);
       N.rollG.gain.setTargetAtTime(smooth.roll * 0.6, t, 0.05);
       N.rollLP.frequency.setTargetAtTime((240 + smooth.roll * 500) * d, t, 0.1);
@@ -96645,7 +96812,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         const was = prev.contacts[u.id];
         prev.contacts[u.id] = !!u.contact;
         if (u.contact && was === false) {
-          const sink = clamp5(Math.abs(vyPrev), 0, 6), big = 0.25 + sink / 6 * 0.75;
+          const sink = clamp6(Math.abs(vyPrev), 0, 6), big = 0.25 + sink / 6 * 0.75;
           burst({ dur: 0.18 + 0.25 * big, f: 180 + 200 * big, gain: 0.55 * big, tone: 70 + 20 * big });
           burst({ dur: 0.08, f: 2500, q: 0.8, gain: 0.12 * big, type: "bandpass" });
         }
@@ -96665,7 +96832,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         f += Math.abs(r[k].forceN || 0);
         n++;
       }
-      const rcs = clamp5(f / 1500, 0, 1.2);
+      const rcs = clamp6(f / 1500, 0, 1.2);
       smooth.rcs = sm(smooth.rcs, rcs, dt, rcs > smooth.rcs ? 0.03 : 0.12);
       N.rcsG.gain.setTargetAtTime(smooth.rcs * 0.55 * (smooth.rpm > 0.05 ? 1 : 0), t, 0.02);
       if (fl.crashed && !prev.crashed) {
@@ -97092,7 +97259,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       rig.setMode(cfg.camera || "pilot");
       const vr = createVR({ renderer: scene.renderer, scene: scene.scene, camera: scene.camera, input, hudOptions: { scale: 1, color: cfg.hud && cfg.hud.color || "verde" } });
       vr.onAction = (n) => weaponAction(n);
-      game = { vr, cfg, world, pw, aoi, scene, model, sim, rig, rf, weapons, combat, convoy: null, paused: false, last: performance.now(), t: 0, focus: new Vector3(), crashT: 0 };
+      game = { vr, cfg, world, pw, aoi, scene, model, sim, rig, rf, weapons, combat, convoy: null, paused: false, last: performance.now(), t: 0, focus: new Vector3(), crashT: 0, rec: createRecorder({ seconds: 14 }), moments: createMoments(), burst: { pts: [], hits: 0, lastT: -1 }, replay: null };
       resetFlight();
       ui.hud.setMode(rig.mode);
       window.__a10 = window.__harrier = game;
@@ -97116,6 +97283,11 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     g.combat = createCombatView(g.scene.scene, { maverickTemplate: g.model.maverickTemplate });
     g.convoy = createConvoy({ route: rf.points.length >= 2 ? rf.points : [rf.a, rf.b], count: mission.convoySize ?? 8, mix: mission.mix || "mixto", seed: Date.now() & 65535, world: g.pw, speed: 10 });
     weapons.reset({ mavericks: (mission.loadout && mission.loadout.mavericks) ?? 4 });
+    if (g.replay) endReplay(g);
+    g.rec.clear();
+    g.moments.clear();
+    g.burst = { pts: [], hits: 0, lastT: -1 };
+    hideReplayBadge();
     g.model.setPylons(weapons.pylons);
     sim.setStores(weapons.stores());
     const head = g.convoy.vehicles[0].pos;
@@ -97189,21 +97361,41 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     return extra;
   }
   var impactList = [];
+  var frameFx = [];
   function handleEvents(g, s, camPos, mode) {
     const tK = s.air && s.air.tempK;
     impactList.length = 0;
+    frameFx.length = 0;
     for (const e of g.weapons.drainEvents()) {
       const d = e.pos ? Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]) : 0;
-      if (e.type === "impact") {
-        g.combat.impact(e.pos, false);
-        impactList.push({ pos: e.pos, hit: false });
-      } else if (e.type === "hit") {
-        g.combat.impact(e.pos, true);
-        impactList.push({ pos: e.pos, hit: true });
+      if (e.type === "impact" || e.type === "hit") {
+        const hit = e.type === "hit";
+        g.combat.impact(e.pos, hit);
+        impactList.push({ pos: e.pos, hit });
+        frameFx.push(e);
+        g.burst.pts.push(e.pos);
+        if (hit) g.burst.hits++;
+        g.burst.lastT = g.t;
       } else if (e.type === "explosion") {
         g.combat.explosion(e.pos, 1.2);
         audio.event("explosion", d, tK);
+        frameFx.push(e);
+        offerReplay(g.moments.add("explosion", g.t, e.pos));
       }
+    }
+    const B = g.burst;
+    if (B.pts.length && g.t - B.lastT > 1) {
+      const c = [0, 0, 0];
+      for (const p of B.pts) {
+        c[0] += p[0];
+        c[1] += p[1];
+        c[2] += p[2];
+      }
+      c[0] /= B.pts.length;
+      c[1] /= B.pts.length;
+      c[2] /= B.pts.length;
+      if (B.pts.length >= 5) offerReplay(g.moments.add("burst", B.lastT, c));
+      g.burst = { pts: [], hits: 0, lastT: -1 };
     }
     if (impactList.length) audio.impacts(impactList, camPos, tK, mode);
     for (const e of g.convoy.drainEvents()) {
@@ -97211,6 +97403,8 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         const d = Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]);
         g.combat.explosion(e.pos, e.vehicle.type === "tank" ? 1.5 : 1);
         audio.event("explosion", d, s.air && s.air.tempK);
+        frameFx.push({ type: "kill", pos: e.pos, size: e.vehicle.type === "tank" ? 1.5 : 1 });
+        offerReplay(g.moments.add("kill", g.t, e.pos));
         const left = g.convoy.alive().length;
         ui.toast(left ? `${e.vehicle.type === "tank" ? "Tanque" : e.vehicle.type === "apc" ? "Blindado" : "Cami\xF3n"} destruido \u2014 quedan ${left}` : "\xA1Convoy destruido! (R para otra misi\xF3n)", 2500);
       } else if (e.type === "alert") ui.toast("El convoy se detiene y se dispersa", 2e3);
@@ -97269,13 +97463,198 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       }
     }
   }
+  var replayBadge = document.createElement("div");
+  replayBadge.style.cssText = "display:none;position:fixed;left:50%;top:150px;transform:translateX(-50%);z-index:40;padding:6px 14px;font:700 15px ui-monospace,monospace;letter-spacing:.08em;color:#ffcf4a;background:rgba(0,0,0,.45);border:1px solid #ffcf4a;border-radius:6px;pointer-events:none";
+  document.body.appendChild(replayBadge);
+  var replayOverlay = document.createElement("div");
+  replayOverlay.style.cssText = "display:none;position:fixed;inset:0;z-index:39;pointer-events:none;font:700 16px ui-monospace,monospace;color:#fff;text-shadow:0 1px 3px #000";
+  replayOverlay.innerHTML = '<div style="position:absolute;left:22px;top:18px"><span style="color:#ff4040">\u25CF</span> REPETICI\xD3N \xB7 C\xC1MARA DE SUELO <span data-k="t"></span></div><div style="position:absolute;left:22px;bottom:18px;font-weight:500;font-size:13px;opacity:.85">X o Esc = volver al vuelo</div><div style="position:absolute;inset:0;border:3px solid rgba(255,64,64,.5)"></div>';
+  document.body.appendChild(replayOverlay);
+  var badgeTimer = 0;
+  var KIND_TXT = { kill: "BLANCO DESTRUIDO", explosion: "IMPACTO DE MAVERICK", burst: "R\xC1FAGA" };
+  function offerReplay(m) {
+    if (!m || !game || game.vr && game.vr.presenting) return;
+    replayBadge.textContent = `\u25B6 ${KIND_TXT[m.kind] || "IMPACTO"} \u2014 X = VER REPETICI\xD3N`;
+    replayBadge.style.display = "block";
+    clearTimeout(badgeTimer);
+    badgeTimer = setTimeout(hideReplayBadge, 1e4);
+  }
+  function hideReplayBadge() {
+    replayBadge.style.display = "none";
+  }
+  function startReplay(g) {
+    if (g.vr && g.vr.presenting) {
+      ui.toast("La repetici\xF3n no est\xE1 disponible en VR", 2e3);
+      return;
+    }
+    const m = g.moments.last(), rec = g.rec;
+    if (!m || rec.frames.length < 10 || m.t < rec.start) {
+      ui.toast("Todav\xEDa no hay ning\xFAn impacto para repetir", 2e3);
+      return;
+    }
+    const t0 = Math.max(rec.start, m.t - 6.5), t1 = Math.min(rec.end, m.t + 4.5);
+    const f02 = rec.frames[rec.indexAt(t0)];
+    const C = groundCameraPos(m.pos, f02.ac.pos, (x, z) => g.pw.height(x, z), { bounds: g.world.bounds });
+    const cam = g.scene.camera;
+    g.replay = {
+      t0,
+      t1,
+      t: t0,
+      idx: rec.indexAt(t0) - 1,
+      m,
+      C,
+      hold: 0,
+      dir: null,
+      fov: null,
+      saved: {
+        veh: g.convoy.vehicles.map((v) => ({ pos: v.pos.slice(), heading: v.heading, state: v.state, burnT: v.burnT })),
+        pyl: g.weapons.pylons.map((p) => p.loaded),
+        fov: cam.fov,
+        hud: ui.hud.visible
+      },
+      proxy: { rounds: [], missiles: [], pool: [], mprox: /* @__PURE__ */ new Map() }
+    };
+    hideReplayBadge();
+    g.combat.clearFx();
+    ui.hud.setVisible(false);
+    g.model.setFirstPerson(false);
+    audio.gun(0, false, { mode: "world" });
+    replayOverlay.style.display = "block";
+    vrBtn.style.visibility = "hidden";
+  }
+  function endReplay(g) {
+    const R = g.replay;
+    if (!R) return;
+    g.convoy.vehicles.forEach((v, i) => {
+      const s0 = R.saved.veh[i];
+      if (!s0) return;
+      v.pos[0] = s0.pos[0];
+      v.pos[1] = s0.pos[1];
+      v.pos[2] = s0.pos[2];
+      v.heading = s0.heading;
+      v.state = s0.state;
+      v.burnT = s0.burnT;
+    });
+    g.weapons.pylons.forEach((p, i) => {
+      p.loaded = R.saved.pyl[i];
+    });
+    g.combat.clearFx();
+    g.combat.syncVehicles(g.convoy);
+    const cam = g.scene.camera;
+    cam.fov = R.saved.fov;
+    cam.updateProjectionMatrix();
+    ui.hud.setVisible(R.saved.hud);
+    audio.gun(0, false, { mode: g.rig.mode });
+    replayOverlay.style.display = "none";
+    vrBtn.style.visibility = "";
+    g.replay = null;
+    g.last = performance.now();
+  }
+  var _look = new Vector3();
+  var shot = { dir: [0, 0, -1], fovDeg: 40 };
+  var rMuzzle = [0, 0, 0];
+  var rDir = [0, 0, 0];
+  function replayStep(g, dt) {
+    const R = g.replay, rec = g.rec, F = rec.frames;
+    R.t = Math.min(R.t + dt, R.t1);
+    const idx = rec.indexAt(R.t), C = R.C, tK = F[idx].ac.air.tempK;
+    impactList.length = 0;
+    for (let i = Math.max(0, R.idx + 1); i <= idx; i++) {
+      const fx = F[i].fx;
+      if (!fx) continue;
+      for (const e of fx) {
+        const d = Math.hypot(e.pos[0] - C[0], e.pos[1] - C[1], e.pos[2] - C[2]);
+        if (e.type === "impact" || e.type === "hit") {
+          g.combat.impact(e.pos, e.type === "hit");
+          impactList.push({ pos: e.pos, hit: e.type === "hit" });
+        } else if (e.type === "explosion") {
+          g.combat.explosion(e.pos, 1.2);
+          audio.event("explosion", d, tK);
+        } else if (e.type === "kill") {
+          g.combat.explosion(e.pos, e.size || 1);
+          audio.event("explosion", d, tK);
+        }
+      }
+    }
+    if (impactList.length) audio.impacts(impactList, C, tK, "world");
+    R.idx = idx;
+    const f = F[idx], ac = f.ac;
+    g.model.update(ac, ac.cgModel);
+    g.convoy.vehicles.forEach((v, i) => {
+      const o = i * 5;
+      if (o + 4 >= f.veh.length) return;
+      v.pos[0] = f.veh[o];
+      v.pos[1] = f.veh[o + 1];
+      v.pos[2] = f.veh[o + 2];
+      v.heading = f.veh[o + 3];
+      v.burnT = f.veh[o + 4];
+      v.state = f.vstate[i];
+    });
+    g.weapons.pylons.forEach((p, i) => {
+      p.loaded = !!(f.pyl & 1 << i);
+    });
+    const P = R.proxy, n = f.rounds.length / 6;
+    P.rounds.length = 0;
+    for (let i = 0; i < n; i++) {
+      const r = P.pool[i] || (P.pool[i] = { pos: [0, 0, 0], vel: [0, 0, 0] }), o = i * 6;
+      r.pos[0] = f.rounds[o];
+      r.pos[1] = f.rounds[o + 1];
+      r.pos[2] = f.rounds[o + 2];
+      r.vel[0] = f.rounds[o + 3];
+      r.vel[1] = f.rounds[o + 4];
+      r.vel[2] = f.rounds[o + 5];
+      P.rounds.push(r);
+    }
+    P.missiles.length = 0;
+    for (const m of f.missiles) {
+      let q = P.mprox.get(m.ref);
+      if (!q) {
+        q = { alive: true };
+        P.mprox.set(m.ref, q);
+      }
+      q.pos = m.pos;
+      q.dir = m.dir;
+      q.motor = m.motor;
+      P.missiles.push(q);
+    }
+    const cam = g.scene.camera;
+    frameShot(C, ac.pos, R.m.pos, shot);
+    const k = R.dir ? 1 - Math.exp(-dt / 0.22) : 1;
+    if (!R.dir) {
+      R.dir = shot.dir.slice();
+      R.fov = shot.fovDeg;
+    }
+    for (let i = 0; i < 3; i++) R.dir[i] += (shot.dir[i] - R.dir[i]) * k;
+    R.fov += (shot.fovDeg - R.fov) * k;
+    cam.position.set(C[0], C[1], C[2]);
+    cam.up.set(0, 1, 0);
+    cam.lookAt(_look.set(C[0] + R.dir[0], C[1] + R.dir[1], C[2] + R.dir[2]));
+    cam.fov = R.fov;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+    g.scene.update(dt, cam.position);
+    g.combat.syncVehicles(g.convoy);
+    const muzzle = g.weapons._worldPoint(ac, g.weapons.muzzle, rMuzzle);
+    bodyX(ac.quat, rDir);
+    g.combat.gunFire(dt, f.firing, muzzle, rDir, ac.vel, 1);
+    g.combat.update(dt, P, g.convoy);
+    audio.update(ac, controlsObj, dt, { mode: "world", camPos: C });
+    audio.gun(f.spin, f.firing, { mode: "world", camPos: C, srcPos: muzzle, tempK: tK });
+    const el = replayOverlay.querySelector('[data-k="t"]');
+    if (el) el.textContent = (R.t - R.m.t >= 0 ? "+" : "\u2212") + Math.abs(R.t - R.m.t).toFixed(1) + " s";
+    if (R.t >= R.t1) {
+      R.hold += dt;
+      if (R.hold > 2) endReplay(g);
+    }
+  }
   function loop(now) {
     if (!game) return;
     const g = game;
     let dt = Math.min(0.1, Math.max(0, (now - g.last) / 1e3));
     g.last = now;
     g.lastDt = dt;
-    if (!g.paused) {
+    if (g.replay) replayStep(g, dt);
+    else if (!g.paused) {
       input.update(dt);
       const c = input.getControls(controlsObj);
       if (g.vr.presenting && g.vr.gun) c.triggerGun = true;
@@ -97322,6 +97701,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       g.combat.update(dt, g.weapons, g.convoy);
       handleEvents(g, s, camPos, mode);
       if (mode !== "pilot") supersonicCracks(g, camPos);
+      g.rec.push(g.t, s, s.cgModel || g.sim.cg, g.weapons, g.convoy, frameFx);
       audio.update(s, c, dt, { mode, camPos });
       audio.gun(g.weapons.spin, g.weapons.firing, { mode, camPos, srcPos: muzzle, tempK: s.air && s.air.tempK });
       if (inVR && g.vr.rumble) {
@@ -97457,7 +97837,12 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   });
   input.on("action", (n) => {
     if (!game) return;
-    if (n === "pause") {
+    if (game.replay) {
+      if (n === "pause" || n === "replay") endReplay(game);
+      return;
+    }
+    if (n === "replay") startReplay(game);
+    else if (n === "pause") {
       game.paused = true;
       audio.stop();
       ui.showPause();

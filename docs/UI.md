@@ -204,3 +204,12 @@ Sin `extra` no se dibuja nada de armas (ni panel de munición, ni pipper, ni rec
 - El HUD muestra el cuadro **PALANCA** con la posición de cabeceo y alabeo, y el aviso «CLIC = TOMAR MOUSE · Q = CENTRAR» mientras el puntero no está tomado.
 - `controls` agrega `mouseStick`, `mouseLocked`, `stickX` y `stickY` (solo para el HUD).
 - Los ajustes guardados con el formato anterior (`v: 1`, mouse apagado) se migran solos a mouse-palanca sin recentrado.
+
+## 12. Repetición desde una cámara de suelo (`src/game/replay.js`)
+- **Grabación**: cada cuadro de vuelo se guarda en un búfer circular de 14 s. Incluye la pose y las superficies del avión, motor y aire (para el audio), los proyectiles en vuelo (posición y velocidad), los misiles, la posición, rumbo y estado de cada vehículo, los Mavericks colgados, el estado del cañón y los efectos del cuadro (impactos, explosiones, derribos).
+- **Momentos**: derribo (`kill`), explosión de Maverick (`explosion`) y ráfaga con 5 impactos o más (`burst`, 1 s después del último impacto, en el centro de los impactos). Los que caen a menos de 2,5 s se fusionan y gana el derribo. Cada momento muestra «▶ … — X = VER REPETICIÓN» durante 10 s.
+- **X** reproduce desde 6,5 s antes del momento hasta 4,5 s después, en tiempo real, y vuelve solo al vuelo. X o Esc salen antes. La simulación queda congelada durante la repetición y sigue exactamente donde estaba.
+- **Cámara**: fija a la altura de los ojos (1,8 m sobre el terreno), 50 m detrás del blanco visto desde el avión y 26 m al costado. Así el blanco queda en primer plano y el avión llega de frente. `frameShot` orienta la cámara y elige el FOV (8–75°) para que entren el avión y el blanco: teleobjetivo con el avión lejos y gran angular cuando pasa. Si no entran los dos, se privilegia el blanco. La orientación y el FOV se suavizan con una constante de 0,22 s.
+- **Sonido**: se escucha desde la cámara de suelo, con el retardo distancia/c del «BRRRT», los impactos y las explosiones. Se ven las trazadoras y los impactos antes de oír el cañón.
+- Al entrar y al salir se limpian las partículas. Los vehículos destruidos vuelven a estar enteros mientras la repetición transcurre antes de su derribo, y al salir se restaura el estado real.
+- En VR no está disponible: la cámara forzada maree.

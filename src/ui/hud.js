@@ -485,7 +485,7 @@ export function createHud({ canvas, ctx: injectedCtx = null, options = null } = 
     text('COMB ' + f0(D.fuel), gx - 4 * u, y0 + 51 * u, 10 * u, col, 'left');
     drawWarnings(W / 2, 54 * u, u);
     if (X.has) drawAttack(W / 2, H / 2, u);
-    drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 20 * u, u);
+    drawStick(Math.max(50 * u, x0 - 50 * u), y0 - 60 * u, u);
   };
 
   const drawFull = (u) => {

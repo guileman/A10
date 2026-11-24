@@ -22,6 +22,7 @@ export const ACTIONS = [
   { id: 'missile', label: 'Disparar Maverick', group: 'Armas', kind: 'press', emit: 'fireMissile', keys: ['Enter'] },
   { id: 'lock', label: 'Fijar blanco (más cercano al centro / ciclar)', group: 'Armas', kind: 'press', emit: 'lockTarget', keys: ['KeyL'] },
   { id: 'unlock', label: 'Soltar blanco', group: 'Armas', kind: 'press', emit: 'unlockTarget', keys: ['KeyU'] },
+  { id: 'replay', label: 'Repetición del último impacto (cámara de suelo)', group: 'Vista', kind: 'press', keys: ['KeyX'] },
   { id: 'gear', label: 'Tren de aterrizaje', group: 'Aeronave', kind: 'press', keys: ['KeyG'] },
   { id: 'flaps', label: 'Flaps (ciclo UP / MVR / DN)', group: 'Aeronave', kind: 'press', keys: ['KeyF'] },
   { id: 'brake', label: 'Frenos de ruedas (mantener)', group: 'Aeronave', kind: 'hold', keys: ['KeyB'] },
