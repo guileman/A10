@@ -1,5 +1,7 @@
 # Simulador A-10C Thunderbolt II (HTML único)
 
+![A-10C Thunderbolt II](assets/brand/cover.jpg)
+
 **Abrir (también desde la Quest):** https://guileman.github.io/A10/ — o descargar `a10-sim.html` y abrirlo directo en el navegador.
 
 Simulador del A-10C sobre mapa real (satélite + relieve + OSM). Empieza en vuelo; el objetivo es un convoy (tanques, blindados y camiones) que recorre una ruta A→B. Armas: cañón GAU-8/A y AGM-65 Maverick. Física de cuerpo rígido con dos TF34 (`docs/PHYSICS_A10.md`), menús y HUD (`docs/UI.md`), malla (`docs/MESH.md`), VR por WebXR (Quest 2 / Rift S).
@@ -51,3 +53,7 @@ En el Navegador de la Quest (o con `?lite` al final de la URL) el simulador usa 
 
 ### Iniciar directamente en VR
 En «Volar» hay un botón **Iniciar en modo VR**: carga el mundo y, cuando termina, muestra «Mundo listo» con un botón **Entrar en VR ahora** (el navegador exige un clic para abrir la sesión). También se puede elegir «Volar sin VR».
+
+
+## Portada e ícono
+`assets/brand/`: `cover.jpg` (portada con título, 1600×900), `og.jpg` (imagen para compartir el link), `menu-bg.jpg` (fondo de los menús), `icon.svg` e `icon-*.png`. La portada se renderiza con el modelo del simulador sobre un desierto montañoso procedural: `node tools/cover/build-cover.mjs && python3 tools/cover/render.py "" dist/cover` (parámetros por URL: `cx, cy, cz, fov, roll, sx, sy, sz, exp, fog`).

@@ -26,16 +26,26 @@ const shim = `const E = window.RallyEngine;\n` + [...names].map((n) => `export c
 
 const res = await build({
   entryPoints: [path.join(root, 'src/main.js')], bundle: true, format: 'iife', write: false, minify: !!process.env.MIN,
-  target: 'es2022', loader: { '.glb': 'base64', '.json': 'json' }, logLevel: 'warning',
+  target: 'es2022', loader: { '.glb': 'base64', '.json': 'json', '.jpg': 'dataurl', '.png': 'dataurl', '.svg': 'text' }, logLevel: 'warning',
   plugins: [{ name: 'three-shim', setup(b) {
     b.onResolve({ filter: /^three$/ }, () => ({ path: 'three-shim', namespace: 'shim' }));
     b.onLoad({ filter: /.*/, namespace: 'shim' }, () => ({ contents: shim, loader: 'js' }));
   } }],
 });
 const app = res.outputFiles[0].text;
+const iconSvg = fs.readFileSync(path.join(root, 'assets/brand/icon.svg'), 'utf8').replace(/<!--[\s\S]*?-->/g, '').replace(/\s+/g, ' ');
+const icon180 = fs.readFileSync(path.join(root, 'assets/brand/icon-180.png')).toString('base64');
+const SITE = 'https://guileman.github.io/A10/';
+const DESC = 'Simulador del A-10C Thunderbolt II en el navegador: cañón GAU-8/A y Mavericks contra un convoy, sobre mapa satelital real. Teclado, mouse y realidad virtual (Quest).';
 const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A-10C Thunderbolt II — simulador</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(iconSvg)}">
+<link rel="apple-touch-icon" href="data:image/png;base64,${icon180}">
+<meta name="theme-color" content="#0c1a12"><meta name="description" content="${DESC}">
+<meta property="og:type" content="website"><meta property="og:title" content="A-10C Thunderbolt II — simulador"><meta property="og:description" content="${DESC}">
+<meta property="og:url" content="${SITE}"><meta property="og:image" content="${SITE}og.jpg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="675">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="${SITE}og.jpg">
 <style>html,body{margin:0;height:100%;background:#05080c;overflow:hidden;font-family:system-ui,sans-serif}
 #view{position:absolute;inset:0}#ui{position:absolute;inset:0;pointer-events:none}#ui>*{pointer-events:auto}</style></head>
 <body><div id="view"></div><div id="ui"></div>

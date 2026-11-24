@@ -13,6 +13,16 @@ import { createCameraRig } from './camera/index.js';
 import { createUI } from './ui/index.js';
 import { createAudio } from './audio/index.js';
 import { createVR } from './xr/vr.js';
+import MENU_BG from '../assets/brand/menu-bg.jpg';
+
+// Portada (A-10 sobre el desierto) como fondo de los menús y de la pantalla de carga; la pausa sigue mostrando el vuelo.
+{
+  const st = document.createElement('style');
+  st.textContent = `.hz-screen:not(.hz-dim),.hz-load{background:linear-gradient(180deg,rgba(4,8,6,.35) 0%,rgba(4,8,6,.72) 55%,rgba(4,8,6,.92) 100%),url(${MENU_BG}) center/cover no-repeat fixed}
+.hz-screen:not(.hz-dim) .hz-panel{background:rgba(10,16,12,.84);backdrop-filter:blur(3px)}
+@media (min-width:1000px){.hz-screen.on:not(.hz-dim):has(h1){justify-content:flex-end;padding-right:5vw}.hz-screen.on:not(.hz-dim):has(h1) .hz-panel{width:min(520px,100%)}}`;
+  document.head.appendChild(st);
+}
 
 // WebXR en PC: el contexto WebGL debe nacer «xrCompatible» para que Chrome lo cree en la misma GPU que el visor
 // (la página de ejemplo de WebXR lo hace así); sin esto, requestSession puede fallar aunque el visor esté detectado.
