@@ -86,7 +86,7 @@ export function createCombatView(scene, { maverickTemplate = null } = {}) {
   const texFire = radialTex([[0, 'rgba(255,250,220,1)'], [0.25, 'rgba(255,190,80,0.9)'], [0.6, 'rgba(220,80,20,0.4)'], [1, 'rgba(120,20,0,0)']]);
   const texSmoke = radialTex([[0, 'rgba(255,255,255,0.75)'], [0.5, 'rgba(255,255,255,0.35)'], [1, 'rgba(255,255,255,0)']]);
   const fire = new Particles(root, 500, texFire, true);
-  const smoke = new Particles(root, 700, texSmoke, false);
+  const smoke = new Particles(root, 1100, texSmoke, false);
 
   // trazadoras: segmentos con brillo aditivo
   const MAXR = 900;
@@ -131,7 +131,36 @@ export function createCombatView(scene, { maverickTemplate = null } = {}) {
   };
   api.impact = (p, onVehicle) => {
     if (onVehicle) fire.spawn(p, { vel: [0, 2, 0], life: 0.12, size0: 1.5, size1: 3.5, color: 0xffe0a0, drag: 1 });
-    else smoke.spawn(p, { vel: [Math.random() - 0.5, 3 + Math.random() * 3, Math.random() - 0.5], life: 1.4, size0: 1.2, size1: 6, color: 0x8a7a60, alpha: 0.7, rise: -1.5, drag: 1.5 });
+    else {
+      // 30 mm HEI: destello, tierra levantada y humo
+      if (Math.random() < 0.6) fire.spawn([p[0], p[1] + 0.5, p[2]], { vel: [0, 3, 0], life: 0.09, size0: 2.2, size1: 4, color: 0xffd090, drag: 1 });
+      smoke.spawn(p, { vel: [(Math.random() - 0.5) * 3, 5 + Math.random() * 5, (Math.random() - 0.5) * 3], life: 2.4, size0: 2, size1: 10, color: 0x7d6c52, alpha: 0.8, rise: -2.0, drag: 1.4 });
+    }
+  };
+
+  /**
+   * Humo y fogonazo del GAU-8. muzzle/dir: boca del cañón y eje del avión en el mundo; vel: velocidad del avión.
+   * Los gases salen hacia adelante a gran velocidad, el aire los frena en ~0,3 s y la nube queda atrás del avión:
+   * a 300 kt pasa por debajo y a los costados de la cabina. intensity 0..1 escala la cantidad (VR: menos).
+   */
+  let gunAcc = 0, flashAcc = 0;
+  api.gunFire = (dt, firing, muzzle, dir, vel, intensity = 1) => {
+    if (!firing) { gunAcc = 0; return; }
+    gunAcc += dt * 60 * intensity; flashAcc += dt;
+    while (gunAcc >= 1) {
+      gunAcc -= 1;
+      const j = Math.random(), sp = 40 + Math.random() * 60, lat = 4;
+      const p = [muzzle[0] - vel[0] * j * dt, muzzle[1] - vel[1] * j * dt, muzzle[2] - vel[2] * j * dt];
+      smoke.spawn(p, {
+        vel: [vel[0] * 0.55 + dir[0] * sp + (Math.random() - 0.5) * lat, vel[1] * 0.55 + dir[1] * sp + (Math.random() - 0.3) * lat, vel[2] * 0.55 + dir[2] * sp + (Math.random() - 0.5) * lat],
+        life: 4 + Math.random() * 4, size0: 1.8, size1: 14 + Math.random() * 10, color: Math.random() < 0.5 ? 0x7a7872 : 0x5e5c58, alpha: 0.75, rise: 0.35, drag: 2.4,
+      });
+    }
+    // fogonazo: destellos cortos pegados a la boca (se mueven con el avión)
+    if (flashAcc > 0.03) {
+      flashAcc = 0;
+      fire.spawn([muzzle[0] + dir[0] * 1.2, muzzle[1] + dir[1] * 1.2, muzzle[2] + dir[2] * 1.2], { vel: vel.slice(), life: 0.045, size0: 1.6 + Math.random(), size1: 2.6, color: 0xffe6b0, drag: 0 });
+    }
   };
 
   let burnAcc = 0;

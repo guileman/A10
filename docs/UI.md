@@ -174,3 +174,24 @@ Sin `extra` no se dibuja nada de armas (ni panel de munición, ni pipper, ni rec
 ## 9. Ajustes posteriores
 - El botón «Entrar en VR» quedó arriba a la derecha y más chico: abajo a la derecha tapaba el bloque de tren, flaps y aerofreno del HUD.
 - Las etiquetas `LOCK` y `LOCK n %` se dibujan sobre el centro del HUD (debajo de `IN RNG`). Antes iban debajo y se superponían con la distancia del diamante del blanco bloqueado.
+
+## 10. Cañón GAU-8/A: sonido, vibración, humo y velocidad del sonido
+- **Sonido** (`src/audio/index.js`). Es un tren de pulsos real de 65 disparos/s: cada disparo combina un chasquido de ruido de ~4 ms y un golpe grave de ~60 Hz y ~14 ms. Pasa por una saturación suave y un realce de graves.
+  - En cabina se oye «a través de la estructura»: pasabajos de 1,5 kHz, sub-graves de 32,5 y 65 Hz, traqueteo metálico de paneles y capota, y un golpe al arrancar.
+  - Afuera el sonido es más brillante y la cola del rugido se alarga.
+  - El silbido del giro de los 7 cañones suena durante el arranque y la parada.
+- **Velocidad del sonido**: c = 20,05·√T, con la temperatura del aire de la física (343 m/s a 20 °C).
+  - Fuera de la cabina, el comienzo y el fin del «BRRRT» llegan con retardo = distancia/c (cámaras de persecución y de mundo). Desde lejos primero se ven las trazadoras y los impactos y después se oye el cañón, como en los videos reales.
+  - Cada impacto HEI de 30 mm se programa como una pequeña explosión que llega con su propio retardo (`audio.impacts`).
+  - Los proyectiles van a ≈1 000 m/s (Mach 3). Los que pasan a menos de 35 m de una cámara externa producen un chasquido supersónico (`audio.crack`).
+  - Las explosiones también usan retardo programado en el reloj de audio, hasta 30 s.
+- **Vibración** (`applyGunShake` en `main.js`). La envolvente sube en 30 ms y cae en 160 ms. Mientras los cañones giran sin disparar queda un 12 % de vibración.
+  - En cabina: temblor aleatorio de ±7 mm y ≈0,43° por cuadro, más un bamboleo de 11 Hz. El HUD también tiembla (±2–3 px).
+  - En persecución la vibración es menor. En la cámara de mundo solo vibra a menos de 400 m del avión.
+  - En VR la cámara **no** se sacude, para evitar el mareo. En su lugar vibran los dos mandos (`vr.rumble`, `hapticActuators.pulse`).
+  - En la física, la modulación del retroceso (45 kN a 65 Hz) pasó del 15 % al 30 %.
+- **Humo** (`combat.gunFire` en `render.js`).
+  - Salen ~60 bocanadas/s de gas gris desde la boca, a la velocidad del avión más 40–100 m/s hacia adelante. El aire las frena enseguida y forman la nube que queda atrás y debajo del avión.
+  - El fogonazo dura 45 ms.
+  - En VR la cantidad baja a la mitad.
+  - Los impactos levantan tierra y producen un destello.

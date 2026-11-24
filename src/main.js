@@ -157,26 +157,67 @@ function buildExtra(g, s, cam) {
   return extra;
 }
 
-function handleEvents(g, s, camPos) {
+const impactList = [];
+function handleEvents(g, s, camPos, mode) {
+  const tK = s.air && s.air.tempK;
+  impactList.length = 0;
   for (const e of g.weapons.drainEvents()) {
     const d = e.pos ? Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]) : 0;
-    if (e.type === 'impact') g.combat.impact(e.pos, false);
-    else if (e.type === 'hit') { g.combat.impact(e.pos, true); if (Math.random() < 0.3) audio.event('hit', d); }
-    else if (e.type === 'explosion') { g.combat.explosion(e.pos, 1.2); audio.event('explosion', d); }
+    if (e.type === 'impact') { g.combat.impact(e.pos, false); impactList.push({ pos: e.pos, hit: false }); }
+    else if (e.type === 'hit') { g.combat.impact(e.pos, true); impactList.push({ pos: e.pos, hit: true }); }
+    else if (e.type === 'explosion') { g.combat.explosion(e.pos, 1.2); audio.event('explosion', d, tK); }
   }
+  // cada impacto de 30 mm HEI suena cuando su onda llega al oyente (distancia / c)
+  if (impactList.length) audio.impacts(impactList, camPos, tK, mode);
   for (const e of g.convoy.drainEvents()) {
     if (e.type === 'kill') {
       const d = Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]);
-      g.combat.explosion(e.pos, e.vehicle.type === 'tank' ? 1.5 : 1); audio.event('explosion', d);
+      g.combat.explosion(e.pos, e.vehicle.type === 'tank' ? 1.5 : 1); audio.event('explosion', d, s.air && s.air.tempK);
       const left = g.convoy.alive().length;
       ui.toast(left ? `${e.vehicle.type === 'tank' ? 'Tanque' : e.vehicle.type === 'apc' ? 'Blindado' : 'Camión'} destruido — quedan ${left}` : '¡Convoy destruido! (R para otra misión)', 2500);
     } else if (e.type === 'alert') ui.toast('El convoy se detiene y se dispersa', 2000);
   }
 }
 
+const muzzleW = [0, 0, 0], gunDir = [0, 0, 0];
+function bodyX(q, o) { const [x, y, z, w] = q; o[0] = 1 - 2 * (y * y + z * z); o[1] = 2 * (x * y + w * z); o[2] = 2 * (x * z - w * y); return o; }
+
+/**
+ * Vibración del GAU-8: temblor de alta frecuencia (aleatorio cada cuadro) + bamboleo de ~11 Hz, sobre la cámara
+ * ya colocada por el rig. En cabina es fuerte (todo tiembla: tablero, capota, HUD); en persecución, menor; en la
+ * cámara de mundo solo si está cerca. En VR no se mueve la cámara (mareo): se usa la vibración de los mandos.
+ */
+let hudEl = null;
+function applyGunShake(g, cam, mode, s) {
+  const w = g.weapons, target = w.firing ? 1 : w.spin > 0.05 ? 0.12 * w.spin : 0;
+  const dt = Math.min(0.1, g.lastDt || 0.016);
+  g.shake = (g.shake || 0) + (target - (g.shake || 0)) * (1 - Math.exp(-dt / (target > (g.shake || 0) ? 0.03 : 0.16)));
+  const k = g.shake;
+  if (!hudEl) hudEl = document.querySelector('.hz-hud');
+  if (k < 0.002) { if (hudEl && hudEl.style.transform) hudEl.style.transform = ''; return; }
+  let pos = 0, ang = 0;
+  if (mode === 'pilot') { pos = 0.007; ang = 0.0075; }            // ≈ 0,43° de temblor angular a pleno
+  else if (mode === 'chase') { pos = 0.05; ang = 0.0025; }
+  else { const d = cam.position.distanceTo(new Vector3(s.pos[0], s.pos[1], s.pos[2])); const f = Math.max(0, 1 - d / 400); pos = 0.04 * f; ang = 0.003 * f; }
+  const r = () => Math.random() * 2 - 1, wob = Math.sin(g.t * 2 * Math.PI * 11) * 0.5;
+  cam.position.x += r() * pos * k; cam.position.y += r() * pos * k; cam.position.z += r() * pos * k;
+  cam.rotateX((r() + wob) * ang * k); cam.rotateY(r() * ang * 0.7 * k); cam.rotateZ(r() * ang * 0.5 * k);
+  if (hudEl) hudEl.style.transform = mode === 'pilot' ? `translate(${(r() * 2.2 * k).toFixed(2)}px, ${(r() * 2.8 * k).toFixed(2)}px)` : '';
+}
+
+/** Chasquido supersónico: un proyectil (≈1 000 m/s, Mach 3) que pasa a menos de 35 m del oyente. */
+function supersonicCracks(g, camPos) {
+  let n = 0;
+  for (const r of g.weapons.rounds) {
+    if (r.cracked) continue;
+    const d = Math.hypot(r.pos[0] - camPos[0], r.pos[1] - camPos[1], r.pos[2] - camPos[2]);
+    if (d < 35) { r.cracked = true; if (n++ < 4) audio.crack(d); }
+  }
+}
+
 function loop(now) {
   if (!game) return;
-  const g = game; let dt = Math.min(0.1, Math.max(0, (now - g.last) / 1000)); g.last = now;
+  const g = game; let dt = Math.min(0.1, Math.max(0, (now - g.last) / 1000)); g.last = now; g.lastDt = dt;
   if (!g.paused) {
     input.update(dt);
     const c = input.getControls(controlsObj);
@@ -205,6 +246,7 @@ function loop(now) {
     } else {
       g.model.setFirstPerson(g.rig.mode === 'pilot');
       g.rig.update(dt, s, input.getLook(lookObj));
+      applyGunShake(g, cam, mode, s);
       cam.updateMatrixWorld(true);
       g.scene.update(dt, cam.position);
       const ex = buildExtra(g, s, cam);
@@ -213,10 +255,15 @@ function loop(now) {
       camPos = [cam.position.x, cam.position.y, cam.position.z];
     }
     g.combat.syncVehicles(g.convoy);
+    const muzzle = g.weapons._worldPoint(s, g.weapons.muzzle, muzzleW);
+    bodyX(s.quat, gunDir);
+    g.combat.gunFire(dt, g.weapons.firing, muzzle, gunDir, s.vel, inVR ? 0.5 : 1);
     g.combat.update(dt, g.weapons, g.convoy);
-    handleEvents(g, s, camPos);
+    handleEvents(g, s, camPos, mode);
+    if (mode !== 'pilot') supersonicCracks(g, camPos);
     audio.update(s, c, dt, { mode, camPos });
-    audio.gun(g.weapons.spin, g.weapons.firing, { mode });
+    audio.gun(g.weapons.spin, g.weapons.firing, { mode, camPos, srcPos: muzzle, tempK: s.air && s.air.tempK });
+    if (inVR && g.vr.rumble) { if (g.weapons.firing) g.vr.rumble(1, 60); else if (g.weapons.spin > 0.05) g.vr.rumble(0.15 * g.weapons.spin, 40); }
     if (s.flags && s.flags.crashed) {
       if (!g.crashT) { g.combat.explosion(s.pos, 2.5); audio.event('explosion', 0); ui.toast('Impacto contra el terreno — reiniciando…', 3000); }
       g.crashT += dt; if (g.crashT > 3.5) resetFlight();

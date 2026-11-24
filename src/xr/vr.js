@@ -119,6 +119,18 @@ export function createVR({ renderer, scene, camera, input, hudOptions }) {
     hudAcc += dt;
     if (hud && (++hudN & 1) === 0) { hud.update(state, controls, hudAcc, vr.extra); hudAcc = 0; hudTex.needsUpdate = true; }
   };
+  /** Vibración de los dos mandos (intensidad 0..1, ms). Usa hapticActuators (Quest) o vibrationActuator. */
+  vr.rumble = (intensity, ms) => {
+    if (!vr.session) return;
+    for (const src of vr.session.inputSources) {
+      const gp = src.gamepad; if (!gp) continue;
+      try {
+        const h = gp.hapticActuators && gp.hapticActuators[0];
+        if (h && h.pulse) h.pulse(intensity, ms);
+        else if (gp.vibrationActuator && gp.vibrationActuator.playEffect) gp.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: intensity, weakMagnitude: intensity });
+      } catch { /* algunos runtimes no lo soportan */ }
+    }
+  };
   vr.dolly = dolly; vr.gun = false; vr.extra = null; vr.onAction = null;
   return vr;
 }

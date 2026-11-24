@@ -114,7 +114,7 @@ export class WeaponSystem {
     this.spin = Math.max(0, Math.min(1, this.spin + (want ? dt / GUN.spinUp : -dt / 0.6)));
     const firing = want && this.spin > 0.75;
     if (firing !== this.firing && sim) {
-      if (firing) sim.setExternalForce('gunRecoil', { forceBody: [-GUN.recoilN, 0, 0], vibration: { frac: 0.15, hz: GUN.rate } });
+      if (firing) sim.setExternalForce('gunRecoil', { forceBody: [-GUN.recoilN, 0, 0], vibration: { frac: 0.3, hz: GUN.rate } });
       else sim.clearExternalForce('gunRecoil');
       this.events.push({ type: firing ? 'gunStart' : 'gunStop' });
     }

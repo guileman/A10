@@ -92652,7 +92652,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       this.spin = Math.max(0, Math.min(1, this.spin + (want ? dt / GUN.spinUp : -dt / 0.6)));
       const firing = want && this.spin > 0.75;
       if (firing !== this.firing && sim) {
-        if (firing) sim.setExternalForce("gunRecoil", { forceBody: [-GUN.recoilN, 0, 0], vibration: { frac: 0.15, hz: GUN.rate } });
+        if (firing) sim.setExternalForce("gunRecoil", { forceBody: [-GUN.recoilN, 0, 0], vibration: { frac: 0.3, hz: GUN.rate } });
         else sim.clearExternalForce("gunRecoil");
         this.events.push({ type: firing ? "gunStart" : "gunStop" });
       }
@@ -92975,7 +92975,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const texFire = radialTex([[0, "rgba(255,250,220,1)"], [0.25, "rgba(255,190,80,0.9)"], [0.6, "rgba(220,80,20,0.4)"], [1, "rgba(120,20,0,0)"]]);
     const texSmoke = radialTex([[0, "rgba(255,255,255,0.75)"], [0.5, "rgba(255,255,255,0.35)"], [1, "rgba(255,255,255,0)"]]);
     const fire = new Particles(root2, 500, texFire, true);
-    const smoke = new Particles(root2, 700, texSmoke, false);
+    const smoke = new Particles(root2, 1100, texSmoke, false);
     const MAXR = 900;
     const tPos = new Float32Array(MAXR * 6), tCol = new Float32Array(MAXR * 6);
     const tGeo = new BufferGeometry();
@@ -93034,7 +93034,38 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     };
     api.impact = (p, onVehicle) => {
       if (onVehicle) fire.spawn(p, { vel: [0, 2, 0], life: 0.12, size0: 1.5, size1: 3.5, color: 16769184, drag: 1 });
-      else smoke.spawn(p, { vel: [Math.random() - 0.5, 3 + Math.random() * 3, Math.random() - 0.5], life: 1.4, size0: 1.2, size1: 6, color: 9075296, alpha: 0.7, rise: -1.5, drag: 1.5 });
+      else {
+        if (Math.random() < 0.6) fire.spawn([p[0], p[1] + 0.5, p[2]], { vel: [0, 3, 0], life: 0.09, size0: 2.2, size1: 4, color: 16765072, drag: 1 });
+        smoke.spawn(p, { vel: [(Math.random() - 0.5) * 3, 5 + Math.random() * 5, (Math.random() - 0.5) * 3], life: 2.4, size0: 2, size1: 10, color: 8219730, alpha: 0.8, rise: -2, drag: 1.4 });
+      }
+    };
+    let gunAcc = 0, flashAcc = 0;
+    api.gunFire = (dt, firing, muzzle, dir, vel, intensity = 1) => {
+      if (!firing) {
+        gunAcc = 0;
+        return;
+      }
+      gunAcc += dt * 60 * intensity;
+      flashAcc += dt;
+      while (gunAcc >= 1) {
+        gunAcc -= 1;
+        const j = Math.random(), sp = 40 + Math.random() * 60, lat = 4;
+        const p = [muzzle[0] - vel[0] * j * dt, muzzle[1] - vel[1] * j * dt, muzzle[2] - vel[2] * j * dt];
+        smoke.spawn(p, {
+          vel: [vel[0] * 0.55 + dir[0] * sp + (Math.random() - 0.5) * lat, vel[1] * 0.55 + dir[1] * sp + (Math.random() - 0.3) * lat, vel[2] * 0.55 + dir[2] * sp + (Math.random() - 0.5) * lat],
+          life: 4 + Math.random() * 4,
+          size0: 1.8,
+          size1: 14 + Math.random() * 10,
+          color: Math.random() < 0.5 ? 8026226 : 6184024,
+          alpha: 0.75,
+          rise: 0.35,
+          drag: 2.4
+        });
+      }
+      if (flashAcc > 0.03) {
+        flashAcc = 0;
+        fire.spawn([muzzle[0] + dir[0] * 1.2, muzzle[1] + dir[1] * 1.2, muzzle[2] + dir[2] * 1.2], { vel: vel.slice(), life: 0.045, size0: 1.6 + Math.random(), size1: 2.6, color: 16770736, drag: 0 });
+      }
     };
     let burnAcc = 0;
     api.update = (dt, weapons, convoy) => {
@@ -96163,7 +96194,9 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     if (!AC) {
       Object.assign(api, { gun() {
       }, event() {
-      }, resume() {
+      }, impacts() {
+      }, crack() {
+      }, soundSpeed: () => SOUND_C, resume() {
       }, update() {
       }, setVolume() {
       }, setMuted() {
@@ -96195,6 +96228,33 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         d[n - f + i] = lerp(d[n - f + i], d[i], t);
       }
       return buf;
+    }
+    function gunPulseBuffer(c) {
+      const sr = c.sampleRate, n = sr, buf = c.createBuffer(1, n, sr), d = buf.getChannelData(0);
+      const shots = 65;
+      let seed = 12345;
+      const rnd = () => (seed = seed * 1103515245 + 12345 & 2147483647) / 2147483647;
+      for (let k = 0; k < shots; k++) {
+        const t0 = Math.floor((k + (rnd() - 0.5) * 0.12) / shots * n), amp = 0.8 + rnd() * 0.25, f = 55 + rnd() * 14;
+        for (let i = 0; i < sr * 0.03; i++) {
+          const j = (t0 + i + n) % n, tt = i / sr;
+          const crack = (rnd() * 2 - 1) * Math.exp(-tt / 35e-4) * 0.9;
+          const thump = Math.sin(2 * Math.PI * f * tt) * Math.exp(-tt / 0.014) * 1.1;
+          d[j] += amp * (crack + thump);
+        }
+      }
+      let m = 0;
+      for (let i = 0; i < n; i++) m = Math.max(m, Math.abs(d[i]));
+      for (let i = 0; i < n; i++) d[i] /= m || 1;
+      return buf;
+    }
+    function softClip(k) {
+      const n = 1024, c = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const x = i / (n - 1) * 2 - 1;
+        c[i] = Math.tanh(k * x) / Math.tanh(k);
+      }
+      return c;
     }
     function noiseSrc(c, buf) {
       const s = c.createBufferSource();
@@ -96336,27 +96396,46 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       N.whineG.connect(bus);
       N.whine.start();
       N.whine2.start();
-      N.gun = ctx.createOscillator();
-      N.gun.type = "sawtooth";
-      N.gun.frequency.value = 65;
-      N.gunSq = ctx.createOscillator();
-      N.gunSq.type = "square";
-      N.gunSq.frequency.value = 65;
-      N.gunLP = biquad(ctx, "lowpass", 1400, 1.2);
+      N.gunBuf = gunPulseBuffer(ctx);
+      N.gunSrc = ctx.createBufferSource();
+      N.gunSrc.buffer = N.gunBuf;
+      N.gunSrc.loop = true;
+      N.gunSrc.start();
+      N.gunShape = ctx.createWaveShaper();
+      N.gunShape.curve = softClip(3.2);
+      N.gunShape.oversample = "2x";
+      N.gunLP = biquad(ctx, "lowpass", 5e3, 0.8);
+      N.gunHS = biquad(ctx, "lowshelf", 120, 0.7);
+      N.gunHS.gain.value = 9;
       N.gunG = ctx.createGain();
       N.gunG.gain.value = 0;
-      const gsq = ctx.createGain();
-      gsq.gain.value = 0.5;
-      N.gunSq.connect(gsq);
-      gsq.connect(N.gunLP);
-      N.gun.connect(N.gunLP);
+      N.gunSrc.connect(N.gunShape);
+      N.gunShape.connect(N.gunHS);
+      N.gunHS.connect(N.gunLP);
       N.gunLP.connect(N.gunG);
       N.gunG.connect(bus);
-      N.gun.start();
-      N.gunSq.start();
-      N.gunNoiseBP = biquad(ctx, "bandpass", 500, 0.6);
+      N.gunNoiseBP = biquad(ctx, "bandpass", 700, 0.5);
       N.gunNG = chain(ctx, ns(), [N.gunNoiseBP], 0);
       N.gunNG.connect(bus);
+      N.gunSub = ctx.createOscillator();
+      N.gunSub.type = "sine";
+      N.gunSub.frequency.value = 32.5;
+      N.gunSub2 = ctx.createOscillator();
+      N.gunSub2.type = "triangle";
+      N.gunSub2.frequency.value = 65;
+      N.gunSubG = ctx.createGain();
+      N.gunSubG.gain.value = 0;
+      const s2 = ctx.createGain();
+      s2.gain.value = 0.6;
+      N.gunSub.connect(N.gunSubG);
+      N.gunSub2.connect(s2);
+      s2.connect(N.gunSubG);
+      N.gunSubG.connect(bus);
+      N.gunSub.start();
+      N.gunSub2.start();
+      N.rattleBP = biquad(ctx, "bandpass", 2300, 3);
+      N.rattleG = chain(ctx, ns(), [N.rattleBP], 0);
+      N.rattleG.connect(bus);
       N.spin = ctx.createOscillator();
       N.spin.type = "sawtooth";
       N.spin.frequency.value = 80;
@@ -96369,9 +96448,9 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       N.spin.start();
       N.buf = buf;
     }
-    function burst({ dur = 0.3, f = 200, q = 0.7, gain = 0.6, type = "lowpass", attack = 3e-3, tone = 0 }) {
+    function burst({ dur = 0.3, f = 200, q = 0.7, gain = 0.6, type = "lowpass", attack = 3e-3, tone = 0, when = 0 }) {
       if (!ctx || !running) return;
-      const t = ctx.currentTime, s = ctx.createBufferSource();
+      const t = Math.max(ctx.currentTime, when || 0), s = ctx.createBufferSource();
       s.buffer = N.buf;
       s.playbackRate.value = 0.8 + Math.random() * 0.4;
       const flt = biquad(ctx, type, f, q), env = ctx.createGain();
@@ -96547,28 +96626,60 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       } else N.warnG.gain.setTargetAtTime(0, t, 0.02);
       prev.warn = pat ? "on" : "";
     };
+    const soundC = (tempK) => tempK > 150 && tempK < 350 ? 20.05 * Math.sqrt(tempK) : SOUND_C;
+    api.soundSpeed = soundC;
+    const gunSt = { on: false, level: 0 };
     api.gun = (spin, firing, view2 = {}) => {
       if (!ctx || !running) return;
-      const t = ctx.currentTime, cab = view2.mode === "pilot" ? 0.85 : 1;
-      N.gunG.gain.setTargetAtTime(firing ? 0.55 * cab : 0, t, firing ? 0.01 : 0.04);
-      N.gunNG.gain.setTargetAtTime(firing ? 0.9 * cab : 0, t, firing ? 0.01 : 0.05);
-      N.gun.frequency.setTargetAtTime(firing ? 65 : 40, t, 0.05);
-      N.gunSq.frequency.setTargetAtTime(firing ? 65 : 40, t, 0.05);
-      N.spinG.gain.setTargetAtTime(spin > 0.02 && !firing ? 0.06 * spin : 0, t, 0.05);
-      N.spin.frequency.setTargetAtTime(40 + spin * 140, t, 0.05);
+      const now = ctx.currentTime, pilot = view2.mode === "pilot";
+      let delay = 0;
+      if (!pilot && view2.camPos && view2.srcPos) delay = Math.min(30, Math.hypot(view2.camPos[0] - view2.srcPos[0], view2.camPos[1] - view2.srcPos[1], view2.camPos[2] - view2.srcPos[2]) / soundC(view2.tempK));
+      const t = now + delay;
+      if (firing !== gunSt.on) {
+        gunSt.on = firing;
+        const atk = 8e-3, rel = pilot ? 0.06 : 0.22;
+        const set = (param, v, tau) => {
+          param.cancelScheduledValues(t);
+          param.setTargetAtTime(v, t, tau);
+        };
+        set(N.gunG.gain, firing ? pilot ? 1.15 : 0.95 : 0, firing ? atk : rel);
+        set(N.gunNG.gain, firing ? pilot ? 0.55 : 0.75 : 0, firing ? atk : rel);
+        set(N.gunSubG.gain, firing && pilot ? 0.9 : 0, firing ? 0.02 : 0.1);
+        set(N.rattleG.gain, firing && pilot ? 0.22 : 0, firing ? 0.03 : 0.12);
+        if (firing) burst({ dur: 0.35, f: 180, gain: pilot ? 0.9 : 0.6, tone: 48, when: t });
+      }
+      N.gunLP.frequency.setTargetAtTime(pilot ? 1500 : view2.mode === "world" ? 3500 : 6500, now, 0.05);
+      N.gunSrc.playbackRate.setTargetAtTime(0.92 + 0.08 * Math.max(0, Math.min(1, spin)), now, 0.05);
+      N.spinG.gain.setTargetAtTime(spin > 0.02 && !firing ? (pilot ? 0.12 : 0.06) * spin : 0, now, 0.05);
+      N.spin.frequency.setTargetAtTime(40 + spin * 140, now, 0.05);
     };
-    api.event = (kind, distM = 0) => {
+    api.impacts = (list, listener, tempK, mode) => {
+      if (!ctx || !running || !list || !list.length || !listener) return;
+      const c = soundC(tempK), now = ctx.currentTime, pilot = mode === "pilot";
+      const step = Math.max(1, Math.ceil(list.length / 8));
+      for (let i = 0; i < list.length; i += step) {
+        const p = list[i].pos, d = Math.hypot(p[0] - listener[0], p[1] - listener[1], p[2] - listener[2]);
+        if (d > 9e3) continue;
+        const att = Math.min(1, 60 / (d + 30)) * (pilot ? 0.6 : 1) * Math.min(3, step);
+        if (att < 4e-3) continue;
+        const when = now + Math.min(30, d / c) + Math.random() * 0.01;
+        burst({ dur: 0.18 + Math.min(0.5, d / 4e3), f: Math.max(250, 2400 / (1 + d / 600)), q: 0.6, gain: Math.min(0.9, att * (list[i].hit ? 1.3 : 1)), tone: list[i].hit ? 90 : 0, when });
+      }
+    };
+    api.crack = (distM) => {
       if (!ctx || !running) return;
-      const delay = Math.min(6, distM / SOUND_C), att = 1 / (1 + distM / 400);
-      const go = (fn) => delay > 0.02 ? setTimeout(fn, delay * 1e3) : fn();
-      if (kind === "explosion") go(() => {
-        burst({ dur: 2.2, f: 260 * (0.5 + att), gain: Math.min(1, 1.2 * att + 0.15), tone: 45, attack: 0.01 });
-        burst({ dur: 0.5, f: 1800, gain: 0.35 * att, type: "bandpass" });
-      });
-      else if (kind === "missile") {
+      burst({ dur: 0.06, f: 3500, q: 0.7, gain: Math.min(0.6, 8 / (distM + 5)), type: "highpass", attack: 5e-4 });
+    };
+    api.event = (kind, distM = 0, tempK) => {
+      if (!ctx || !running) return;
+      const when = ctx.currentTime + Math.min(30, distM / soundC(tempK)), att = 1 / (1 + distM / 400);
+      if (kind === "explosion") {
+        burst({ dur: 2.2 + Math.min(1.5, distM / 3e3), f: 260 * (0.5 + att), gain: Math.min(1, 1.2 * att + 0.15), tone: 45, attack: 0.01, when });
+        burst({ dur: 0.5, f: 1800, gain: 0.35 * att, type: "bandpass", when });
+      } else if (kind === "missile") {
         burst({ dur: 1.6, f: 900, q: 0.5, gain: 0.6, type: "bandpass", attack: 0.05 });
         burst({ dur: 0.25, f: 300, gain: 0.5, tone: 90 });
-      } else if (kind === "hit") go(() => burst({ dur: 0.12, f: 1200, gain: 0.25 * att, type: "bandpass" }));
+      } else if (kind === "hit") burst({ dur: 0.12, f: 1200, gain: 0.25 * att, type: "bandpass", when });
       else if (kind === "lock" || kind === "nolock") {
         const o = ctx.createOscillator(), og = ctx.createGain(), tt = ctx.currentTime;
         o.type = "sine";
@@ -96812,6 +96923,19 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         hudTex.needsUpdate = true;
       }
     };
+    vr.rumble = (intensity, ms) => {
+      if (!vr.session) return;
+      for (const src of vr.session.inputSources) {
+        const gp = src.gamepad;
+        if (!gp) continue;
+        try {
+          const h = gp.hapticActuators && gp.hapticActuators[0];
+          if (h && h.pulse) h.pulse(intensity, ms);
+          else if (gp.vibrationActuator && gp.vibrationActuator.playEffect) gp.vibrationActuator.playEffect("dual-rumble", { duration: ms, strongMagnitude: intensity, weakMagnitude: intensity });
+        } catch {
+        }
+      }
+    };
     vr.dolly = dolly;
     vr.gun = false;
     vr.extra = null;
@@ -97003,26 +97127,85 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     extra.message = out ? "SALIENDO DEL \xC1REA \u2014 VIR\xC1" : alive === 0 ? "CONVOY DESTRUIDO" : null;
     return extra;
   }
-  function handleEvents(g, s, camPos) {
+  var impactList = [];
+  function handleEvents(g, s, camPos, mode) {
+    const tK = s.air && s.air.tempK;
+    impactList.length = 0;
     for (const e of g.weapons.drainEvents()) {
       const d = e.pos ? Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]) : 0;
-      if (e.type === "impact") g.combat.impact(e.pos, false);
-      else if (e.type === "hit") {
+      if (e.type === "impact") {
+        g.combat.impact(e.pos, false);
+        impactList.push({ pos: e.pos, hit: false });
+      } else if (e.type === "hit") {
         g.combat.impact(e.pos, true);
-        if (Math.random() < 0.3) audio.event("hit", d);
+        impactList.push({ pos: e.pos, hit: true });
       } else if (e.type === "explosion") {
         g.combat.explosion(e.pos, 1.2);
-        audio.event("explosion", d);
+        audio.event("explosion", d, tK);
       }
     }
+    if (impactList.length) audio.impacts(impactList, camPos, tK, mode);
     for (const e of g.convoy.drainEvents()) {
       if (e.type === "kill") {
         const d = Math.hypot(e.pos[0] - camPos[0], e.pos[1] - camPos[1], e.pos[2] - camPos[2]);
         g.combat.explosion(e.pos, e.vehicle.type === "tank" ? 1.5 : 1);
-        audio.event("explosion", d);
+        audio.event("explosion", d, s.air && s.air.tempK);
         const left = g.convoy.alive().length;
         ui.toast(left ? `${e.vehicle.type === "tank" ? "Tanque" : e.vehicle.type === "apc" ? "Blindado" : "Cami\xF3n"} destruido \u2014 quedan ${left}` : "\xA1Convoy destruido! (R para otra misi\xF3n)", 2500);
       } else if (e.type === "alert") ui.toast("El convoy se detiene y se dispersa", 2e3);
+    }
+  }
+  var muzzleW = [0, 0, 0];
+  var gunDir = [0, 0, 0];
+  function bodyX(q, o) {
+    const [x, y, z, w] = q;
+    o[0] = 1 - 2 * (y * y + z * z);
+    o[1] = 2 * (x * y + w * z);
+    o[2] = 2 * (x * z - w * y);
+    return o;
+  }
+  var hudEl = null;
+  function applyGunShake(g, cam, mode, s) {
+    const w = g.weapons, target = w.firing ? 1 : w.spin > 0.05 ? 0.12 * w.spin : 0;
+    const dt = Math.min(0.1, g.lastDt || 0.016);
+    g.shake = (g.shake || 0) + (target - (g.shake || 0)) * (1 - Math.exp(-dt / (target > (g.shake || 0) ? 0.03 : 0.16)));
+    const k = g.shake;
+    if (!hudEl) hudEl = document.querySelector(".hz-hud");
+    if (k < 2e-3) {
+      if (hudEl && hudEl.style.transform) hudEl.style.transform = "";
+      return;
+    }
+    let pos = 0, ang = 0;
+    if (mode === "pilot") {
+      pos = 7e-3;
+      ang = 75e-4;
+    } else if (mode === "chase") {
+      pos = 0.05;
+      ang = 25e-4;
+    } else {
+      const d = cam.position.distanceTo(new Vector3(s.pos[0], s.pos[1], s.pos[2]));
+      const f = Math.max(0, 1 - d / 400);
+      pos = 0.04 * f;
+      ang = 3e-3 * f;
+    }
+    const r = () => Math.random() * 2 - 1, wob = Math.sin(g.t * 2 * Math.PI * 11) * 0.5;
+    cam.position.x += r() * pos * k;
+    cam.position.y += r() * pos * k;
+    cam.position.z += r() * pos * k;
+    cam.rotateX((r() + wob) * ang * k);
+    cam.rotateY(r() * ang * 0.7 * k);
+    cam.rotateZ(r() * ang * 0.5 * k);
+    if (hudEl) hudEl.style.transform = mode === "pilot" ? `translate(${(r() * 2.2 * k).toFixed(2)}px, ${(r() * 2.8 * k).toFixed(2)}px)` : "";
+  }
+  function supersonicCracks(g, camPos) {
+    let n = 0;
+    for (const r of g.weapons.rounds) {
+      if (r.cracked) continue;
+      const d = Math.hypot(r.pos[0] - camPos[0], r.pos[1] - camPos[1], r.pos[2] - camPos[2]);
+      if (d < 35) {
+        r.cracked = true;
+        if (n++ < 4) audio.crack(d);
+      }
     }
   }
   function loop(now) {
@@ -97030,6 +97213,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
     const g = game;
     let dt = Math.min(0.1, Math.max(0, (now - g.last) / 1e3));
     g.last = now;
+    g.lastDt = dt;
     if (!g.paused) {
       input.update(dt);
       const c = input.getControls(controlsObj);
@@ -97062,6 +97246,7 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
       } else {
         g.model.setFirstPerson(g.rig.mode === "pilot");
         g.rig.update(dt, s, input.getLook(lookObj));
+        applyGunShake(g, cam, mode, s);
         cam.updateMatrixWorld(true);
         g.scene.update(dt, cam.position);
         const ex = buildExtra(g, s, cam);
@@ -97070,10 +97255,18 @@ float rvn(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         camPos = [cam.position.x, cam.position.y, cam.position.z];
       }
       g.combat.syncVehicles(g.convoy);
+      const muzzle = g.weapons._worldPoint(s, g.weapons.muzzle, muzzleW);
+      bodyX(s.quat, gunDir);
+      g.combat.gunFire(dt, g.weapons.firing, muzzle, gunDir, s.vel, inVR ? 0.5 : 1);
       g.combat.update(dt, g.weapons, g.convoy);
-      handleEvents(g, s, camPos);
+      handleEvents(g, s, camPos, mode);
+      if (mode !== "pilot") supersonicCracks(g, camPos);
       audio.update(s, c, dt, { mode, camPos });
-      audio.gun(g.weapons.spin, g.weapons.firing, { mode });
+      audio.gun(g.weapons.spin, g.weapons.firing, { mode, camPos, srcPos: muzzle, tempK: s.air && s.air.tempK });
+      if (inVR && g.vr.rumble) {
+        if (g.weapons.firing) g.vr.rumble(1, 60);
+        else if (g.weapons.spin > 0.05) g.vr.rumble(0.15 * g.weapons.spin, 40);
+      }
       if (s.flags && s.flags.crashed) {
         if (!g.crashT) {
           g.combat.explosion(s.pos, 2.5);

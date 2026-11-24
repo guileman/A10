@@ -9,7 +9,7 @@ const sm = (cur, target, dt, tau) => cur + (target - cur) * (1 - Math.exp(-dt / 
 export function createAudio({ AudioContextClass } = {}) {
   const AC = AudioContextClass !== undefined ? AudioContextClass : (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext));
   const api = { supported: !!AC, volume: 0.7, muted: false, ctx: null };
-  if (!AC) { Object.assign(api, { gun() {}, event() {}, resume() {}, update() {}, setVolume() {}, setMuted() {}, toggleMute() { return false; }, stop() {}, reset() {} }); return api; }
+  if (!AC) { Object.assign(api, { gun() {}, event() {}, impacts() {}, crack() {}, soundSpeed: () => SOUND_C, resume() {}, update() {}, setVolume() {}, setMuted() {}, toggleMute() { return false; }, stop() {}, reset() {} }); return api; }
 
   let ctx = null, g = null, running = false;
   const smooth = { rpm: 0, thr: 0, wind: 0, roll: 0, rcs: 0, down: 0, skid: 0, gearMotor: 0, dop: 1, dist: 0 };
@@ -28,6 +28,23 @@ export function createAudio({ AudioContextClass } = {}) {
     const f = Math.floor(n * 0.01); for (let i = 0; i < f; i++) { const t = i / f; d[n - f + i] = lerp(d[n - f + i], d[i], t); }
     return buf;
   }
+  /** 1 s de disparos a 65/s con fluctuación: cada disparo = chasquido (ruido, ~4 ms) + golpe grave (~60 Hz, ~14 ms). */
+  function gunPulseBuffer(c) {
+    const sr = c.sampleRate, n = sr, buf = c.createBuffer(1, n, sr), d = buf.getChannelData(0);
+    const shots = 65; let seed = 12345; const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let k = 0; k < shots; k++) {
+      const t0 = Math.floor((k + (rnd() - 0.5) * 0.12) / shots * n), amp = 0.8 + rnd() * 0.25, f = 55 + rnd() * 14;
+      for (let i = 0; i < sr * 0.03; i++) {
+        const j = (t0 + i + n) % n, tt = i / sr;
+        const crack = (rnd() * 2 - 1) * Math.exp(-tt / 0.0035) * 0.9;
+        const thump = Math.sin(2 * Math.PI * f * tt) * Math.exp(-tt / 0.014) * 1.1;
+        d[j] += amp * (crack + thump);
+      }
+    }
+    let m = 0; for (let i = 0; i < n; i++) m = Math.max(m, Math.abs(d[i])); for (let i = 0; i < n; i++) d[i] /= m || 1;
+    return buf;
+  }
+  function softClip(k) { const n = 1024, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / Math.tanh(k); } return c; }
   function noiseSrc(c, buf) { const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.loopStart = 0; s.loopEnd = buf.duration; s.start(); return s; }
   function chain(c, src, nodes, gain0 = 0) { let n = src; for (const x of nodes) { n.connect(x); n = x; } const gn = c.createGain(); gn.gain.value = gain0; n.connect(gn); return gn; }
   function biquad(c, type, f, q = 0.7) { const b = c.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; }
@@ -75,22 +92,33 @@ export function createAudio({ AudioContextClass } = {}) {
     N.whine2 = ctx.createOscillator(); N.whine2.type = 'triangle'; N.whine2.frequency.value = 3000;
     N.whineG = ctx.createGain(); N.whineG.gain.value = 0;
     const wbp = biquad(ctx, 'bandpass', 3000, 1.5); N.whine.connect(wbp); N.whine2.connect(wbp); wbp.connect(N.whineG); N.whineG.connect(bus); N.whine.start(); N.whine2.start();
-    // --- GAU-8: zumbido grave (65 disparos/s) con armónicos + ráfaga de ruido, y silbido del giro de cañones
-    N.gun = ctx.createOscillator(); N.gun.type = 'sawtooth'; N.gun.frequency.value = 65;
-    N.gunSq = ctx.createOscillator(); N.gunSq.type = 'square'; N.gunSq.frequency.value = 65;
-    N.gunLP = biquad(ctx, 'lowpass', 1400, 1.2); N.gunG = ctx.createGain(); N.gunG.gain.value = 0;
-    const gsq = ctx.createGain(); gsq.gain.value = 0.5; N.gunSq.connect(gsq); gsq.connect(N.gunLP);
-    N.gun.connect(N.gunLP); N.gunLP.connect(N.gunG); N.gunG.connect(bus); N.gun.start(); N.gunSq.start();
-    N.gunNoiseBP = biquad(ctx, 'bandpass', 500, 0.6); N.gunNG = chain(ctx, ns(), [N.gunNoiseBP], 0); N.gunNG.connect(bus);
+    // --- GAU-8/A: tren de pulsos real (65 disparos/s), cada disparo = chasquido + golpe grave. Distorsión suave para el "desgarro".
+    N.gunBuf = gunPulseBuffer(ctx);
+    N.gunSrc = ctx.createBufferSource(); N.gunSrc.buffer = N.gunBuf; N.gunSrc.loop = true; N.gunSrc.start();
+    N.gunShape = ctx.createWaveShaper(); N.gunShape.curve = softClip(3.2); N.gunShape.oversample = '2x';
+    N.gunLP = biquad(ctx, 'lowpass', 5000, 0.8); N.gunHS = biquad(ctx, 'lowshelf', 120, 0.7); N.gunHS.gain.value = 9;
+    N.gunG = ctx.createGain(); N.gunG.gain.value = 0;
+    N.gunSrc.connect(N.gunShape); N.gunShape.connect(N.gunHS); N.gunHS.connect(N.gunLP); N.gunLP.connect(N.gunG); N.gunG.connect(bus);
+    // ráfaga de ruido (gases de la boca) modulada por el mismo tren de pulsos
+    N.gunNoiseBP = biquad(ctx, 'bandpass', 700, 0.5); N.gunNG = chain(ctx, ns(), [N.gunNoiseBP], 0); N.gunNG.connect(bus);
+    // vibración estructural (solo en cabina): sub-graves 32,5 y 65 Hz que se sienten más que se oyen
+    N.gunSub = ctx.createOscillator(); N.gunSub.type = 'sine'; N.gunSub.frequency.value = 32.5;
+    N.gunSub2 = ctx.createOscillator(); N.gunSub2.type = 'triangle'; N.gunSub2.frequency.value = 65;
+    N.gunSubG = ctx.createGain(); N.gunSubG.gain.value = 0;
+    const s2 = ctx.createGain(); s2.gain.value = 0.6; N.gunSub.connect(N.gunSubG); N.gunSub2.connect(s2); s2.connect(N.gunSubG);
+    N.gunSubG.connect(bus); N.gunSub.start(); N.gunSub2.start();
+    // traqueteo metálico de la cabina (paneles, capota): ruido agudo resonante
+    N.rattleBP = biquad(ctx, 'bandpass', 2300, 3); N.rattleG = chain(ctx, ns(), [N.rattleBP], 0); N.rattleG.connect(bus);
+    // giro de los 7 cañones (motores hidráulicos)
     N.spin = ctx.createOscillator(); N.spin.type = 'sawtooth'; N.spin.frequency.value = 80; N.spinLP = biquad(ctx, 'bandpass', 900, 2);
     N.spinG = ctx.createGain(); N.spinG.gain.value = 0; N.spin.connect(N.spinLP); N.spinLP.connect(N.spinG); N.spinG.connect(bus); N.spin.start();
     N.buf = buf;
   }
 
   /** Disparo único: ruido filtrado con envolvente. */
-  function burst({ dur = 0.3, f = 200, q = 0.7, gain = 0.6, type = 'lowpass', attack = 0.003, tone = 0 }) {
+  function burst({ dur = 0.3, f = 200, q = 0.7, gain = 0.6, type = 'lowpass', attack = 0.003, tone = 0, when = 0 }) {
     if (!ctx || !running) return;
-    const t = ctx.currentTime, s = ctx.createBufferSource(); s.buffer = N.buf; s.playbackRate.value = 0.8 + Math.random() * 0.4;
+    const t = Math.max(ctx.currentTime, when || 0), s = ctx.createBufferSource(); s.buffer = N.buf; s.playbackRate.value = 0.8 + Math.random() * 0.4;
     const flt = biquad(ctx, type, f, q), env = ctx.createGain();
     env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(gain, t + attack); env.gain.exponentialRampToValueAtTime(0.0008, t + dur);
     s.connect(flt); flt.connect(env); env.connect(N.bus); s.start(t, Math.random() * 1.5, dur + 0.05);
@@ -226,24 +254,67 @@ export function createAudio({ AudioContextClass } = {}) {
     } else N.warnG.gain.setTargetAtTime(0, t, 0.02);
     prev.warn = pat ? 'on' : '';
   };
-  /** Estado continuo del cañón: spin 0..1 (giro de los 7 cañones), firing (disparando). */
+  /** Velocidad del sonido (m/s) para la temperatura del aire (K); 340 si no se conoce. */
+  const soundC = (tempK) => (tempK > 150 && tempK < 350 ? 20.05 * Math.sqrt(tempK) : SOUND_C);
+  api.soundSpeed = soundC;
+  const gunSt = { on: false, level: 0 };
+  /**
+   * Estado continuo del cañón: spin 0..1 (giro de los 7 cañones), firing (disparando).
+   * view: { mode, camPos, srcPos, tempK }. Fuera de la cabina el inicio y el fin del "BRRRT" llegan con
+   * retardo = distancia / c: desde lejos se ven las trazadoras e impactos antes de oír el cañón.
+   */
   api.gun = (spin, firing, view = {}) => {
     if (!ctx || !running) return;
-    const t = ctx.currentTime, cab = view.mode === 'pilot' ? 0.85 : 1;
-    N.gunG.gain.setTargetAtTime(firing ? 0.55 * cab : 0, t, firing ? 0.01 : 0.04);
-    N.gunNG.gain.setTargetAtTime(firing ? 0.9 * cab : 0, t, firing ? 0.01 : 0.05);
-    N.gun.frequency.setTargetAtTime(firing ? 65 : 40, t, 0.05); N.gunSq.frequency.setTargetAtTime(firing ? 65 : 40, t, 0.05);
-    N.spinG.gain.setTargetAtTime(spin > 0.02 && !firing ? 0.06 * spin : 0, t, 0.05);
-    N.spin.frequency.setTargetAtTime(40 + spin * 140, t, 0.05);
+    const now = ctx.currentTime, pilot = view.mode === 'pilot';
+    let delay = 0;
+    if (!pilot && view.camPos && view.srcPos) delay = Math.min(30, Math.hypot(view.camPos[0] - view.srcPos[0], view.camPos[1] - view.srcPos[1], view.camPos[2] - view.srcPos[2]) / soundC(view.tempK));
+    const t = now + delay;
+    if (firing !== gunSt.on) {
+      gunSt.on = firing;
+      const atk = 0.008, rel = pilot ? 0.06 : 0.22; // afuera la cola del rugido se alarga (eco del terreno)
+      const set = (param, v, tau) => { param.cancelScheduledValues(t); param.setTargetAtTime(v, t, tau); };
+      set(N.gunG.gain, firing ? (pilot ? 1.15 : 0.95) : 0, firing ? atk : rel);
+      set(N.gunNG.gain, firing ? (pilot ? 0.55 : 0.75) : 0, firing ? atk : rel);
+      set(N.gunSubG.gain, firing && pilot ? 0.9 : 0, firing ? 0.02 : 0.1);
+      set(N.rattleG.gain, firing && pilot ? 0.22 : 0, firing ? 0.03 : 0.12);
+      if (firing) burst({ dur: 0.35, f: 180, gain: pilot ? 0.9 : 0.6, tone: 48, when: t }); // golpe de arranque
+    }
+    // filtro: en cabina se oye a través de la estructura (más grave y saturado); afuera más brillante
+    N.gunLP.frequency.setTargetAtTime(pilot ? 1500 : view.mode === 'world' ? 3500 : 6500, now, 0.05);
+    N.gunSrc.playbackRate.setTargetAtTime(0.92 + 0.08 * Math.max(0, Math.min(1, spin)), now, 0.05);
+    N.spinG.gain.setTargetAtTime(spin > 0.02 && !firing ? (pilot ? 0.12 : 0.06) * spin : 0, now, 0.05);
+    N.spin.frequency.setTargetAtTime(40 + spin * 140, now, 0.05);
+  };
+
+  /**
+   * Impactos de proyectiles de 30 mm (HEI): cada uno es una pequeña explosión que llega con retardo distancia/c.
+   * list: [{pos:[x,y,z], hit:bool}] del cuadro; listener: [x,y,z]. Se reproducen como máximo 8 por cuadro.
+   */
+  api.impacts = (list, listener, tempK, mode) => {
+    if (!ctx || !running || !list || !list.length || !listener) return;
+    const c = soundC(tempK), now = ctx.currentTime, pilot = mode === 'pilot';
+    const step = Math.max(1, Math.ceil(list.length / 8));
+    for (let i = 0; i < list.length; i += step) {
+      const p = list[i].pos, d = Math.hypot(p[0] - listener[0], p[1] - listener[1], p[2] - listener[2]);
+      if (d > 9000) continue;
+      const att = Math.min(1, 60 / (d + 30)) * (pilot ? 0.6 : 1) * Math.min(3, step);
+      if (att < 0.004) continue;
+      const when = now + Math.min(30, d / c) + Math.random() * 0.01;
+      burst({ dur: 0.18 + Math.min(0.5, d / 4000), f: Math.max(250, 2400 / (1 + d / 600)), q: 0.6, gain: Math.min(0.9, att * (list[i].hit ? 1.3 : 1)), tone: list[i].hit ? 90 : 0, when });
+    }
+  };
+  /** Estampido de un proyectil supersónico (1 000 m/s) que pasa cerca del oyente. */
+  api.crack = (distM) => {
+    if (!ctx || !running) return;
+    burst({ dur: 0.06, f: 3500, q: 0.7, gain: Math.min(0.6, 8 / (distM + 5)), type: 'highpass', attack: 0.0005 });
   };
   /** Sonidos puntuales con retardo y atenuación por distancia (m). kind: 'explosion' | 'missile' | 'hit' | 'lock' | 'nolock'. */
-  api.event = (kind, distM = 0) => {
+  api.event = (kind, distM = 0, tempK) => {
     if (!ctx || !running) return;
-    const delay = Math.min(6, distM / SOUND_C), att = 1 / (1 + distM / 400);
-    const go = (fn) => (delay > 0.02 ? setTimeout(fn, delay * 1000) : fn());
-    if (kind === 'explosion') go(() => { burst({ dur: 2.2, f: 260 * (0.5 + att), gain: Math.min(1, 1.2 * att + 0.15), tone: 45, attack: 0.01 }); burst({ dur: 0.5, f: 1800, gain: 0.35 * att, type: 'bandpass' }); });
+    const when = ctx.currentTime + Math.min(30, distM / soundC(tempK)), att = 1 / (1 + distM / 400);
+    if (kind === 'explosion') { burst({ dur: 2.2 + Math.min(1.5, distM / 3000), f: 260 * (0.5 + att), gain: Math.min(1, 1.2 * att + 0.15), tone: 45, attack: 0.01, when }); burst({ dur: 0.5, f: 1800, gain: 0.35 * att, type: 'bandpass', when }); }
     else if (kind === 'missile') { burst({ dur: 1.6, f: 900, q: 0.5, gain: 0.6, type: 'bandpass', attack: 0.05 }); burst({ dur: 0.25, f: 300, gain: 0.5, tone: 90 }); }
-    else if (kind === 'hit') go(() => burst({ dur: 0.12, f: 1200, gain: 0.25 * att, type: 'bandpass' }));
+    else if (kind === 'hit') burst({ dur: 0.12, f: 1200, gain: 0.25 * att, type: 'bandpass', when });
     else if (kind === 'lock' || kind === 'nolock') {
       const o = ctx.createOscillator(), og = ctx.createGain(), tt = ctx.currentTime;
       o.type = 'sine'; o.frequency.value = kind === 'lock' ? 1600 : 400; og.gain.setValueAtTime(0.08, tt); og.gain.exponentialRampToValueAtTime(0.001, tt + 0.25);
