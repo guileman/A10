@@ -1,0 +1,4 @@
+node_modules/
+dist/
+tests/ui/harness/dist/
+__pycache__/

@@ -1,0 +1,133 @@
+{
+ "_note": "Marco modelo CAD: x proa, y lateral, z arriba, metros. Escala 0.00418 m/unidad IGES (ESTIMADA: largo total 14.09 m vs 13.87 m AV-8A). Posiciones de toberas/RCS/ojo/CG: ESTIMADAS, verificar contra datos reales. CONVENCI\u00d3N: en este archivo y positivo = IZQUIERDA (x proa, y izq., z arriba; terna derecha). Cuerpo del contrato: x proa, y arriba, z derecha => cuerpo=(x, z, -y).",
+ "scaleMPerUnit": 0.00418,
+ "lengthM": 14.091,
+ "gear": {
+  "nose": {
+   "wheelCenter": [
+    1.567,
+    0.0,
+    -2.633
+   ],
+   "wheelRadius": 0.334,
+   "attach": [
+    1.965,
+    0.0,
+    -1.17
+   ],
+   "tires": 1
+  },
+  "main": {
+   "wheelCenters": [
+    [
+     -1.308,
+     -0.238,
+     -2.387
+    ],
+    [
+     -1.308,
+     0.238,
+     -2.387
+    ]
+   ],
+   "wheelRadius": 0.334,
+   "attach": [
+    -1.308,
+    0.0,
+    -1.045
+   ],
+   "tires": 2
+  },
+  "outriggerL": {
+   "wheelCenter": [
+    -1.492,
+    2.475,
+    -2.479
+   ],
+   "wheelRadius": 0.226,
+   "attach": [
+    -1.492,
+    2.475,
+    -0.736
+   ],
+   "tires": 1
+  },
+  "outriggerR": {
+   "wheelCenter": [
+    -1.492,
+    -2.475,
+    -2.479
+   ],
+   "wheelRadius": 0.226,
+   "attach": [
+    -1.492,
+    -2.475,
+    -0.736
+   ],
+   "tires": 1
+  }
+ },
+ "nozzles": {
+  "frontL": [
+   1.17,
+   0.874,
+   -1.003
+  ],
+  "frontR": [
+   1.17,
+   -0.874,
+   -1.003
+  ],
+  "rearL": [
+   -1.108,
+   0.752,
+   -0.865
+  ],
+  "rearR": [
+   -1.108,
+   -0.752,
+   -0.865
+  ],
+  "_status": "centros de grupos 453/454 del IGES (ductos con codo); ejes de giro ESTIMADOS"
+ },
+ "rcs": {
+  "noseVertical": [
+   6.27,
+   0.0,
+   -1.045
+  ],
+  "tailVertical": [
+   -7.106,
+   0.0,
+   0.0
+  ],
+  "tailYaw": [
+   -7.106,
+   0.0,
+   0.836
+  ],
+  "wingtipL": [
+   -1.923,
+   4.807,
+   -0.961
+  ],
+  "wingtipR": [
+   -1.923,
+   -4.807,
+   -0.961
+  ],
+  "_status": "ESTIMADO"
+ },
+ "eyeLocal": [
+  3.762,
+  0.0,
+  0.502
+ ],
+ "extentsUnits": {
+  "x": [
+   -1702,
+   1669
+  ],
+  "zGroundMin": -711
+ }
+}

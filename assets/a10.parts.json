@@ -1,0 +1,1016 @@
+{
+ "_note": "Marco modelo = marco cuerpo (x proa, y arriba, z derecha), metros, origen en el CG supuesto. pivot = posición ABSOLUTA del origen del nodo en marco modelo; el nodo glTF hijo guarda su traslación relativa al padre. axis = eje de rotación (marco modelo); ángulos en grados; signo por regla de la mano derecha.",
+ "scaleMPerFileUnit": 0.0674898626622842,
+ "cgFile": [
+  0.0,
+  1.4907,
+  -6.0309
+ ],
+ "dims": {
+  "spanM": 17.53,
+  "lengthM": 15.807,
+  "lengthNoGunM": 15.518,
+  "heightM": 4.357
+ },
+ "triangles": {
+  "exterior": 112784,
+  "interior": 29549,
+  "templates": 5000
+ },
+ "nodes": {
+  "Body": {
+   "tris": 61999,
+   "material": "gunship",
+   "bbox": [
+    [
+     -8.5505,
+     -1.0013,
+     -8.765
+    ],
+    [
+     6.9676,
+     2.05,
+     8.765
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "Gun": {
+   "tris": 8000,
+   "material": "gunmetal",
+   "bbox": [
+    [
+     6.554,
+     -0.6378,
+     -0.2381
+    ],
+    [
+     7.2562,
+     -0.3949,
+     0.0048
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "CockpitPanel": {
+   "tris": 8999,
+   "material": "cockpit",
+   "bbox": [
+    [
+     4.4862,
+     0.0652,
+     -0.5104
+    ],
+    [
+     5.5984,
+     0.8517,
+     0.5114
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "interior": true
+  },
+  "PilotSeat": {
+   "tris": 7804,
+   "material": "seat",
+   "bbox": [
+    [
+     3.1297,
+     0.0354,
+     -0.3515
+    ],
+    [
+     4.5334,
+     1.2355,
+     0.3473
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "interior": true
+  },
+  "Pilot": {
+   "tris": 12746,
+   "material": "pilot",
+   "bbox": [
+    [
+     3.8398,
+     0.1225,
+     -0.2693
+    ],
+    [
+     5.0696,
+     1.3237,
+     0.2649
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "interior": true
+  },
+  "WindshieldFrame": {
+   "tris": 2499,
+   "material": "gunship",
+   "bbox": [
+    [
+     4.4379,
+     0.6949,
+     -0.5609
+    ],
+    [
+     5.5618,
+     1.4436,
+     0.5611
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "WindshieldGlass": {
+   "tris": 972,
+   "material": "glass",
+   "bbox": [
+    [
+     4.4627,
+     0.7151,
+     -0.5453
+    ],
+    [
+     5.5409,
+     1.4283,
+     0.5453
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ]
+  },
+  "CanopyFrame": {
+   "tris": 2500,
+   "material": "gunship",
+   "bbox": [
+    [
+     2.1943,
+     0.6223,
+     -0.6165
+    ],
+    [
+     4.606,
+     1.4652,
+     0.6165
+    ]
+   ],
+   "pivot": [
+    2.2362,
+    0.6729,
+    0.0
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "bisagra trasera: + = abre hacia arriba-atrás"
+  },
+  "CanopyGlass": {
+   "tris": 1400,
+   "material": "glass",
+   "bbox": [
+    [
+     2.6964,
+     0.8082,
+     -0.5369
+    ],
+    [
+     4.5343,
+     1.4952,
+     0.5369
+    ]
+   ],
+   "pivot": [
+    2.2362,
+    0.6729,
+    0.0
+   ],
+   "parent": "CanopyFrame",
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "hija de CanopyFrame (se abre con ella)"
+  },
+  "AileronL": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.104,
+     -0.2789,
+     -8.1864
+    ],
+    [
+     -1.1892,
+     0.084,
+     -5.5667
+    ]
+   ],
+   "pivot": [
+    -1.3803,
+    -0.1076,
+    -6.8759
+   ],
+   "axis": [
+    0.0001,
+    -0.0694,
+    0.9976
+   ],
+   "rangeDeg": [
+    -25,
+    25
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "AileronR": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.104,
+     -0.2789,
+     5.5667
+    ],
+    [
+     -1.1892,
+     0.084,
+     8.1864
+    ]
+   ],
+   "pivot": [
+    -1.3803,
+    -0.1076,
+    6.8759
+   ],
+   "axis": [
+    -0.0001,
+    0.0694,
+    0.9976
+   ],
+   "rangeDeg": [
+    -25,
+    25
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "FlapInnerL": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.1714,
+     -0.4978,
+     -2.4331
+    ],
+    [
+     -1.5375,
+     -0.3609,
+     -0.7424
+    ]
+   ],
+   "pivot": [
+    -1.6226,
+    -0.4374,
+    -1.5828
+   ],
+   "axis": [
+    0.0001,
+    -0.0002,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "FlapInnerR": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.1714,
+     -0.4978,
+     0.7424
+    ],
+    [
+     -1.5375,
+     -0.3609,
+     2.4331
+    ]
+   ],
+   "pivot": [
+    -1.6226,
+    -0.4374,
+    1.5828
+   ],
+   "axis": [
+    -0.0001,
+    0.0002,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "FlapOuterL": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.1691,
+     -0.4989,
+     -5.56
+    ],
+    [
+     -1.456,
+     -0.1418,
+     -2.4398
+    ]
+   ],
+   "pivot": [
+    -1.5866,
+    -0.3182,
+    -4.0015
+   ],
+   "axis": [
+    -0.0235,
+    -0.0794,
+    0.9966
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "FlapOuterR": {
+   "tris": 1200,
+   "material": "gunship",
+   "bbox": [
+    [
+     -2.1691,
+     -0.4989,
+     2.4398
+    ],
+    [
+     -1.456,
+     -0.1418,
+     5.56
+    ]
+   ],
+   "pivot": [
+    -1.5866,
+    -0.3182,
+    4.0015
+   ],
+   "axis": [
+    0.0235,
+    0.0794,
+    0.9966
+   ],
+   "rangeDeg": [
+    0,
+    40
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "ElevatorL": {
+   "tris": 483,
+   "material": "gunship",
+   "bbox": [
+    [
+     -8.2506,
+     -0.4865,
+     -2.4674
+    ],
+    [
+     -7.4276,
+     -0.3085,
+     -0.3711
+    ]
+   ],
+   "pivot": [
+    -7.5517,
+    -0.3522,
+    -1.4012
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    -30,
+    20
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "ElevatorR": {
+   "tris": 483,
+   "material": "gunship",
+   "bbox": [
+    [
+     -8.2506,
+     -0.4865,
+     0.3711
+    ],
+    [
+     -7.4276,
+     -0.3085,
+     2.4674
+    ]
+   ],
+   "pivot": [
+    -7.5517,
+    -0.3522,
+    1.4012
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    -30,
+    20
+   ],
+   "note": "ángulo + = borde de fuga abajo (regla de la mano derecha sobre el eje)"
+  },
+  "RudderL": {
+   "tris": 1800,
+   "material": "gunship",
+   "bbox": [
+    [
+     -8.3616,
+     -0.784,
+     -2.6554
+    ],
+    [
+     -6.7549,
+     2.0467,
+     -2.4063
+    ]
+   ],
+   "pivot": [
+    -7.6129,
+    0.6323,
+    -2.5311
+   ],
+   "axis": [
+    -0.0001,
+    1.0,
+    -0.0004
+   ],
+   "rangeDeg": [
+    -30,
+    30
+   ],
+   "note": "ángulo + = borde de fuga a la derecha (guiñada a la derecha)"
+  },
+  "RudderR": {
+   "tris": 1800,
+   "material": "gunship",
+   "bbox": [
+    [
+     -8.3616,
+     -0.7841,
+     2.4063
+    ],
+    [
+     -6.7549,
+     2.0465,
+     2.6554
+    ]
+   ],
+   "pivot": [
+    -7.6129,
+    0.6323,
+    2.531
+   ],
+   "axis": [
+    -0.0001,
+    1.0,
+    0.0003
+   ],
+   "rangeDeg": [
+    -30,
+    30
+   ],
+   "note": "ángulo + = borde de fuga a la derecha (guiñada a la derecha)"
+  },
+  "NoseGear": {
+   "tris": 3499,
+   "material": "gear",
+   "bbox": [
+    [
+     3.8275,
+     -2.1188,
+     0.0441
+    ],
+    [
+     4.4855,
+     -0.4379,
+     0.3927
+    ]
+   ],
+   "pivot": [
+    4.3115,
+    -0.5379,
+    0.1768
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    90
+   ],
+   "note": "retracción hacia ADELANTE: 0 = abajo, +90° = arriba"
+  },
+  "NoseWheel": {
+   "tris": 2500,
+   "material": "tire",
+   "bbox": [
+    [
+     4.074,
+     -2.3084,
+     0.0594
+    ],
+    [
+     4.5481,
+     -1.8343,
+     0.2948
+    ]
+   ],
+   "pivot": [
+    4.3115,
+    -2.0704,
+    0.1768
+   ],
+   "parent": "NoseGear",
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": null,
+   "note": "giro alrededor de z local; dirección alrededor de y local (la rueda está bajo el eje de la pata)",
+   "steerAxis": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "steerRangeDeg": [
+    -60,
+    60
+   ]
+  },
+  "NoseGearLinks": {
+   "tris": 1597,
+   "material": "gear",
+   "bbox": [
+    [
+     3.8204,
+     -1.6775,
+     -0.0
+    ],
+    [
+     4.1426,
+     -0.4379,
+     0.4333
+    ]
+   ],
+   "pivot": [
+    3.8864,
+    -0.4379,
+    0.1768
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    0
+   ],
+   "note": "brazos de arrastre/compuerta trasera del tren de proa: no se modela el pliegue; ocultar cuando la extensión < 0.6"
+  },
+  "NoseGearDoor": {
+   "tris": 1852,
+   "material": "gunship",
+   "bbox": [
+    [
+     4.9241,
+     -1.0668,
+     0.449
+    ],
+    [
+     5.9324,
+     -0.5706,
+     0.55
+    ]
+   ],
+   "pivot": [
+    5.4399,
+    -0.5706,
+    0.4686
+   ],
+   "axis": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "rangeDeg": [
+    0,
+    90
+   ],
+   "note": "0 = abierta (como en el CAD, tren abajo), +90° = cerrada (gira hacia el centro del avión)"
+  },
+  "MainGearL": {
+   "tris": 3500,
+   "material": "gear",
+   "bbox": [
+    [
+     -0.3992,
+     -2.0349,
+     -2.7275
+    ],
+    [
+     -0.0875,
+     -0.1958,
+     -2.1875
+    ]
+   ],
+   "pivot": [
+    -0.1803,
+    -0.2958,
+    -2.3224
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    88
+   ],
+   "note": "retracción: 0 = abajo, +88° = arriba (la pata gira hacia ADELANTE dentro de la góndola, la rueda queda semi-expuesta)"
+  },
+  "MainWheelL": {
+   "tris": 3000,
+   "material": "tire",
+   "bbox": [
+    [
+     -0.52,
+     -2.2918,
+     -2.7269
+    ],
+    [
+     0.1589,
+     -1.6132,
+     -2.4229
+    ]
+   ],
+   "pivot": [
+    -0.1803,
+    -1.9518,
+    -2.5754
+   ],
+   "parent": "MainGearL",
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": null,
+   "note": "giro de la rueda alrededor de z local (eje del eje); rodar hacia adelante = rotación NEGATIVA en z"
+  },
+  "MainGearBraceL": {
+   "tris": 600,
+   "material": "gear",
+   "bbox": [
+    [
+     -0.2557,
+     -1.1413,
+     -2.5072
+    ],
+    [
+     0.6636,
+     -0.4218,
+     -2.406
+    ]
+   ],
+   "pivot": [
+    0.6636,
+    -0.5303,
+    -2.4566
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    0
+   ],
+   "note": "riostra plegable: no se modela el pliegue; ocultarla cuando la extensión del tren < 0.6"
+  },
+  "MainGearR": {
+   "tris": 3500,
+   "material": "gear",
+   "bbox": [
+    [
+     -0.3992,
+     -2.0341,
+     2.1875
+    ],
+    [
+     -0.0874,
+     -0.1958,
+     2.7274
+    ]
+   ],
+   "pivot": [
+    -0.1803,
+    -0.2958,
+    2.3224
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    88
+   ],
+   "note": "retracción: 0 = abajo, +88° = arriba (la pata gira hacia ADELANTE dentro de la góndola, la rueda queda semi-expuesta)"
+  },
+  "MainWheelR": {
+   "tris": 3000,
+   "material": "tire",
+   "bbox": [
+    [
+     -0.5197,
+     -2.2926,
+     2.4229
+    ],
+    [
+     0.1613,
+     -1.6129,
+     2.7266
+    ]
+   ],
+   "pivot": [
+    -0.1803,
+    -1.9518,
+    2.5754
+   ],
+   "parent": "MainGearR",
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": null,
+   "note": "giro de la rueda alrededor de z local (eje del eje); rodar hacia adelante = rotación NEGATIVA en z"
+  },
+  "MainGearBraceR": {
+   "tris": 600,
+   "material": "gear",
+   "bbox": [
+    [
+     -0.2557,
+     -1.1413,
+     2.406
+    ],
+    [
+     0.6636,
+     -0.4218,
+     2.5072
+    ]
+   ],
+   "pivot": [
+    0.6636,
+    -0.5303,
+    2.4566
+   ],
+   "axis": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rangeDeg": [
+    0,
+    0
+   ],
+   "note": "riostra plegable: no se modela el pliegue; ocultarla cuando la extensión del tren < 0.6"
+  },
+  "AGM65": {
+   "tris": 2500,
+   "material": "weaponw",
+   "bbox": [
+    [
+     -1.2308,
+     -0.2623,
+     -0.2624
+    ],
+    [
+     1.245,
+     0.2639,
+     0.2637
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "template": true,
+   "parent": "Templates",
+   "lengthM": 2.49,
+   "bodyDiamM": 0.305,
+   "finSpanM": 0.746,
+   "lugOffsetM": 0.1525,
+   "note": "origen en el centro, x = proa; colgar con su +y tocando el pilón: pos = estación − (0, lugOffsetM, 0)"
+  },
+  "Mk82": {
+   "tris": 2500,
+   "material": "weapon",
+   "bbox": [
+    [
+     -1.1052,
+     -0.1497,
+     -0.1509
+    ],
+    [
+     1.105,
+     0.1507,
+     0.1496
+    ]
+   ],
+   "pivot": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "template": true,
+   "parent": "Templates",
+   "lengthM": 2.21,
+   "bodyDiamM": 0.273,
+   "finSpanM": 0.408,
+   "lugOffsetM": 0.1365,
+   "note": "origen en el centro, x = proa; colgar con su +y tocando el pilón: pos = estación − (0, lugOffsetM, 0)"
+  }
+ },
+ "stations": [
+  {
+   "id": "STA1",
+   "attach": [
+    -0.2228,
+    -0.4863,
+    -5.903
+   ],
+   "originalLoad": "thunderbolt missile 1",
+   "pylonGapM": -0.06
+  },
+  {
+   "id": "STA2",
+   "attach": [
+    -0.0697,
+    -0.5824,
+    -4.7497
+   ],
+   "originalLoad": "thunderbolt missile 1",
+   "pylonGapM": -0.06
+  },
+  {
+   "id": "STA3",
+   "attach": [
+    0.3837,
+    -0.6919,
+    -3.6201
+   ],
+   "originalLoad": "thunderbolt rocket launcher",
+   "pylonGapM": -0.0
+  },
+  {
+   "id": "STA4",
+   "attach": [
+    0.4352,
+    -0.7912,
+    -1.3923
+   ],
+   "originalLoad": "thunderbolt missile 2",
+   "pylonGapM": -0.024
+  },
+  {
+   "id": "STA5",
+   "attach": [
+    0.2302,
+    -0.7991,
+    -0.3799
+   ],
+   "originalLoad": "thunderbolt bomb",
+   "pylonGapM": -0.0
+  },
+  {
+   "id": "STA7",
+   "attach": [
+    0.2302,
+    -0.7991,
+    0.3732
+   ],
+   "originalLoad": "thunderbolt bomb",
+   "pylonGapM": -0.0
+  },
+  {
+   "id": "STA8",
+   "attach": [
+    0.4352,
+    -0.7912,
+    1.3855
+   ],
+   "originalLoad": "thunderbolt missile 2",
+   "pylonGapM": -0.024
+  },
+  {
+   "id": "STA9",
+   "attach": [
+    0.3778,
+    -0.6885,
+    3.6201
+   ],
+   "originalLoad": "thunderbolt missile 3",
+   "pylonGapM": -0.022
+  },
+  {
+   "id": "STA10",
+   "attach": [
+    -0.0697,
+    -0.5824,
+    4.7632
+   ],
+   "originalLoad": "thunderbolt missile 1",
+   "pylonGapM": -0.06
+  },
+  {
+   "id": "STA11",
+   "attach": [
+    -0.2228,
+    -0.4863,
+    5.876
+   ],
+   "originalLoad": "thunderbolt missile 1",
+   "pylonGapM": -0.06
+  }
+ ]
+}
